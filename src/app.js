@@ -34,7 +34,7 @@ function createApp({ store, routeFn, now, rand, uploadsDir = null, dev = process
   app.use(express.urlencoded({ extended: false }));
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'same-origin');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin'); // OSM tiles require a Referer (origin is enough)
     res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self)');
     next();
   });

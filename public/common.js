@@ -24,6 +24,7 @@ const MR = (() => {
     L.control.zoom({ position: 'bottomright' }).addTo(m);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+      referrerPolicy: 'strict-origin-when-cross-origin', // OSM blocks tile requests without a Referer
     }).addTo(m);
     return m;
   }
