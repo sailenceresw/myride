@@ -53,7 +53,8 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
   );
 }
 
-// Leaflet page: draw(state) replaces markers/lines; fly/fit move the camera, offset for the bottom sheet.
+// Leaflet page: draw(state) replaces markers/lines; fly (animated pan — flyTo would zoom-pulse on every GPS fix)
+// and fit move the camera, offset for the bottom sheet.
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>html,body,#m{margin:0;height:100%;background:#eef0ec}.leaflet-div-icon{background:none;border:0}
@@ -72,7 +73,7 @@ window.mr={
   draw(s){pad=s.pad;layer.clearLayers();
     s.lines.forEach(l=>L.polyline(l.coords.map(p=>[p.lat,p.lng]),{color:l.color,weight:l.width,lineCap:'round',lineJoin:'round'}).addTo(layer));
     s.markers.forEach(m=>L.marker([m.at.lat,m.at.lng],{icon:icon(m),title:m.title||''}).addTo(layer));},
-  fly(c,z,ms){const p=map.project([c.lat,c.lng],z).add([(pad.right-pad.left)/2,(pad.bottom-pad.top)/2]);map.flyTo(map.unproject(p,z),z,{duration:ms/1000});},
+  fly(c,z,ms){const p=map.project([c.lat,c.lng],z).add([(pad.right-pad.left)/2,(pad.bottom-pad.top)/2]);map.setView(map.unproject(p,z),z,{animate:true,duration:ms/1000});},
   fit(pts,p){if(pts.length)map.fitBounds(pts.map(x=>[x.lat,x.lng]),{paddingTopLeft:[p.left,p.top],paddingBottomRight:[p.right,p.bottom]});}
 };send('ready');
 </script></body></html>`;

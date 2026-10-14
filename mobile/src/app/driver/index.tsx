@@ -85,7 +85,7 @@ export default function DriverHome() {
     if (!still) load();
   };
   useEvents((e) => {
-    if (e.type === 'offer' && !trip) showOffers([e.trip, ...offers.filter((x) => x.id !== e.trip.id)]);
+    if (e.type === 'offer' && !trip) showOffers([...offers.filter((x) => x.id !== e.trip.id), e.trip]); // queue behind the card on screen
     else if (e.type === 'trip' && e.role === 'driver' && e.trip.id === trip?.id) tripChanged(e.trip);
     else if (e.type === 'face_check') load(); // load() opens the selfie screen
   }, !!d?.online);
