@@ -119,6 +119,8 @@ npm run typecheck && npm run lint
 
 The apps find the API automatically: same machine as the Expo dev server for phones on Wi-Fi, `10.0.2.2` for the Android emulator, `localhost` for the iOS simulator. Set `EXPO_PUBLIC_API_URL` for anything else.
 
+Field-test navigation on the Android emulator by replaying a real road route through its GPS (noise, speed and a wrong turn to trigger rerouting): accept a trip in MyRide Drive, then run `node tools/gps-replay.js --from lakeside --to mahendrapul --kmh 30 --detour`.
+
 Store builds use EAS profiles (`rider`, `driver`, and `*-preview` APKs): `npx eas-cli@latest build --profile driver --platform android`.
 
 ---
