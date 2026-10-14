@@ -6,6 +6,7 @@ const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
 const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
 const rewards = require('./rewards');
 const kyc = require('./kyc');
+const { createFaceVerifier } = require('./faceVerify');
 const payroll = require('./payroll');
 const { sendSms, templates, PHONE_RE } = require('./sms');
 
@@ -30,7 +31,7 @@ const OTP = {
   maxTries: 5,
 };
 
-function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
+function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, face = createFaceVerifier(), otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
   for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog']) if (!store.db[c]) store.db[c] = {};
   if (!Array.isArray(store.db.smsLog)) store.db.smsLog = [];
   const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
@@ -535,11 +536,11 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return kycView(app);
   }
 
-  function createDriverRecord(user, { driverType, vehicle, gender, licence, bank, faceDescriptor, fleetVehicleId, monthlyWage, homeAddress = '', simulated = false }) {
+  function createDriverRecord(user, { driverType, vehicle, gender, licence, bank, faceDescriptor, faceRef, fleetVehicleId, monthlyWage, homeAddress = '', simulated = false }) {
     return store.put('drivers', {
       id: store.id('drv'), userId: user.id, name: user.name, phone: user.phone, driverType, simulated, homeAddress,
       gender: ['female', 'male', 'other'].includes(gender) ? gender : 'other',
-      licence, bank: bank || null, faceDescriptor: faceDescriptor || null,
+      licence, bank: bank || null, faceDescriptor: faceDescriptor || null, faceRef: faceRef || null, // faceRef = enrolled selfie file
       vehicle: {
         type: vehicle.type, fuel: ['ev', 'petrol', 'diesel'].includes(vehicle.fuel) ? vehicle.fuel : ['bike', 'car', 'van'].includes(vehicle.type) ? 'petrol' : 'diesel',
         plate: String(vehicle.plate).toUpperCase().slice(0, 20), model: String(vehicle.model || '').slice(0, 40),
@@ -583,7 +584,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     user.name = app.personal.fullName;
     const d = createDriverRecord(user, {
       driverType: app.driverType, vehicle, gender: app.personal.gender, licence: app.licence, bank: app.bank,
-      faceDescriptor: app.face.selfieDescriptor, fleetVehicleId: app.driverType === 'employee' ? fleetVehicleId : null, monthlyWage, homeAddress: app.personal.address,
+      faceDescriptor: app.face.selfieDescriptor, faceRef: app.documents.selfie, fleetVehicleId: app.driverType === 'employee' ? fleetVehicleId : null, monthlyWage, homeAddress: app.personal.address,
     });
     if (app.driverType === 'employee') store.get('fleet', fleetVehicleId).assignedDriverId = d.id;
     app.status = 'approved';
@@ -643,10 +644,13 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return d;
   }
 
-  function submitSelfie(user, { descriptor, photo }) {
+  async function submitSelfie(user, { descriptor, photo }) {
     const d = driverOf(user) || fail(403, 'Not a driver');
-    if (photo && files) files.save(user.id, 'selfie_check', photo);
-    const res = kyc.verifySelfie(d, descriptor, now());
+    if (face.serverSide && !photo) fail(400, 'Take a selfie photo');
+    const saved = photo && files ? files.save(user.id, 'selfie_check', photo) : null;
+    const bytes = (id) => (id && files?.read(id)?.buf) || null;
+    const match = await face.verify({ descriptor, enrolled: d.faceDescriptor, history: d.faceCheck?.history, photo: bytes(saved?.id), reference: bytes(d.faceRef) });
+    const res = kyc.verifySelfie(d, match, now());
     if (d.suspended) {
       if (d.online) { accrueOnline(d); d.online = false; d.onlineSince = null; }
       bus.emit('admin', { type: 'face_fail', driverId: d.id, name: d.name });

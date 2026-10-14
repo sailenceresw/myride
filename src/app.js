@@ -24,12 +24,12 @@ function createBus(offline = () => {}) {
   };
 }
 
-function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sms, pushFetch, uploadsDir = null, dev = process.env.NODE_ENV !== 'production' } = {}) {
+function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sms, face, pushFetch, uploadsDir = null, dev = process.env.NODE_ENV !== 'production' } = {}) {
   const push = createPush({ store, fetchImpl: pushFetch });
   const bus = createBus((ch, msg) => push.deliver(ch, msg));
   const adminPhones = (process.env.ADMIN_PHONES || (dev ? '9800000000' : '')).split(',').filter(Boolean);
   const files = createFiles(store, uploadsDir);
-  const svc = createService({ store, bus, routeFn, now, rand, files, sms, isAdminPhone: (p) => adminPhones.includes(p) });
+  const svc = createService({ store, bus, routeFn, now, rand, files, sms, face, isAdminPhone: (p) => adminPhones.includes(p) });
   svc.seedPromos();
 
   const app = express();

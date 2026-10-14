@@ -138,6 +138,10 @@ Store builds use EAS profiles (`rider`, `driver`, and `*-preview` APKs): `npx ea
 | `MYRIDE_FEDERAL_DRAFT=0` | Apply Gandaki rules only (default also complies with the national draft) |
 | `GOOGLE_MAPS_ANDROID_KEY`, `GOOGLE_MAPS_IOS_KEY` | Mobile store builds (restrict to the app package / bundle ID) |
 | `EXPO_PUBLIC_API_URL` | Mobile API base URL (e.g. `https://api.myride.com.np`) |
+| `EAS_PROJECT_ID_RIDER`, `EAS_PROJECT_ID_DRIVER` | EAS project IDs: enable push notifications in the store apps |
+| `EXPO_ACCESS_TOKEN` | Only if Expo "enhanced push security" is on |
+| `FACE_PROVIDER` | `local` (default, on-device descriptors) or `rekognition` (server-side photo match) |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `FACE_MIN_SIMILARITY` | AWS Rekognition for selfie checks (default `ap-south-1`, 90%) |
 
 ---
 
@@ -158,7 +162,7 @@ test/           Server test suite
 ## Production checklist
 
 - [ ] PostgreSQL + PostGIS, Redis pub/sub, encrypted object storage for KYC files with a retention policy
-- [ ] Server-side face matching with anti-spoofing liveness (vendor)
+- [ ] `FACE_PROVIDER=rekognition` for selfie checks; add a liveness vendor (e.g. Rekognition Face Liveness) for spoof detection
 - [ ] Sparrow/Aakash accounts with an NTA-approved sender ID; strong `OTP_SECRET`
 - [ ] eSewa/Khalti merchant keys, Fonepay QR, CorporatePay API
 - [ ] Google Maps API keys for the mobile store builds; self-hosted OSRM and map tiles
