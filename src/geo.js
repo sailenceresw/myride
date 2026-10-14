@@ -110,6 +110,35 @@ async function route(a, b, { fetchImpl = globalThis.fetch, timeoutMs = 4000 } = 
   }
 }
 
+// Turn-by-turn route for in-app navigation (OSRM steps). Falls back to a single straight "head to" step.
+async function navigationRoute(a, b, { fetchImpl = globalThis.fetch, timeoutMs = 6000 } = {}) {
+  const fallback = () => {
+    const r = estimateRoute(a, b);
+    return { ...r, steps: [{ type: 'depart', modifier: 'straight', name: '', distance: r.km * 1000, duration: r.min * 60, location: [a.lat, a.lng] }, { type: 'arrive', modifier: '', name: '', distance: 0, duration: 0, location: [b.lat, b.lng] }] };
+  };
+  if (process.env.MYRIDE_OFFLINE === '1' || !fetchImpl) return fallback();
+  try {
+    const url = `${OSRM}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers: { 'User-Agent': 'MyRide/0.1' } });
+    const json = await res.json();
+    if (json.code !== 'Ok' || !json.routes?.length) return fallback();
+    const r = json.routes[0];
+    return {
+      km: r.distance / 1000,
+      min: Math.max((r.duration / 60) * CITY.trafficFactor, 1),
+      geometry: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+      steps: r.legs.flatMap((leg) => leg.steps).map((s) => ({
+        type: s.maneuver.type, modifier: s.maneuver.modifier || '', exit: s.maneuver.exit, name: s.name || s.ref || '',
+        distance: s.distance, duration: s.duration * CITY.trafficFactor,
+        location: [s.maneuver.location[1], s.maneuver.location[0]], bearingAfter: s.maneuver.bearing_after,
+      })),
+      source: 'osrm',
+    };
+  } catch {
+    return fallback();
+  }
+}
+
 function nearestPlace(p, maxKm = 0.6) {
   let best = null;
   for (const pl of places) {
@@ -141,4 +170,4 @@ function alongPolyline(geometry, t) {
   }
 }
 
-module.exports = { haversineKm, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, estimateRoute, route, nearestPlace, alongPolyline, places };
+module.exports = { haversineKm, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, navigationRoute, estimateRoute, route, nearestPlace, alongPolyline, places };
