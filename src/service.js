@@ -7,6 +7,7 @@ const { findCandidates, canServe, hoursLeftToday } = require('./dispatch');
 const rewards = require('./rewards');
 const kyc = require('./kyc');
 const payroll = require('./payroll');
+const { sendSms, templates } = require('./sms');
 
 const PHONE_RE = /^9[678]\d{8}$/; // Nepal mobile: 98x/97x (NTC, Ncell), 96x (Smart)
 const ACTIVE = ['searching', 'accepted', 'arrived', 'in_progress'];
@@ -21,24 +22,54 @@ const pin4 = () => String(crypto.randomInt(1000, 10000));
 const r2 = (n) => Math.round(n * 100) / 100;
 const kindOf = (svc) => (svc.kind === 'ride' ? 'ride' : svc.logistics ? 'logistics' : 'delivery');
 
-function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random }) {
-  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files']) if (!store.db[c]) store.db[c] = {};
+const OTP = {
+  ttlMs: 5 * 60 * 1000,
+  resendMs: 60 * 1000, // one SMS per number per minute
+  perPhonePerHour: 5,
+  perIpPerHour: +process.env.OTP_IP_LIMIT || 20,
+  maxTries: 5,
+};
+
+function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
+  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog', 'smsLog']) if (!store.db[c]) store.db[c] = {};
+  const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
+
+  // Fire-and-forget notification SMS; outcome logged for ops.
+  function notify(phone, text, kind) {
+    Promise.resolve(sms(phone, text)).then((r) => {
+      const id = store.id('sms');
+      store.db.smsLog[id] = { id, at: now(), phone, kind, ok: !!r?.ok, provider: r?.provider, error: r?.error };
+      store.save();
+    }).catch(() => {});
+  }
 
   // ---------- auth: one identity, separate portals (like Uber's rider app vs Driver app) ----------
-  function requestOtp(phone) {
+  // OTP by SMS: rate-limited per number and per IP; only an HMAC of the code is stored.
+  async function requestOtp(phone, { ip = 'unknown' } = {}) {
     if (!PHONE_RE.test(String(phone || ''))) fail(400, 'Enter a valid Nepali mobile number (98XXXXXXXX)');
+    const t = now();
+    const prev = store.db.otps[phone];
+    if (prev && t - prev.sentAt < OTP.resendMs) fail(429, `Please wait ${Math.ceil((OTP.resendMs - (t - prev.sentAt)) / 1000)} s before requesting another code`);
+    const recent = (key) => (store.db.otpLog[key] || []).filter((x) => t - x < 3600000);
+    if (recent(`p:${phone}`).length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
+    if (recent(`ip:${ip}`).length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
     const code = String(crypto.randomInt(100000, 1000000));
-    store.db.otps[phone] = { code, expires: now() + 5 * 60 * 1000, tries: 0 };
+    const r = await sms(phone, templates.otp(code));
+    if (!r?.ok) fail(502, 'Could not send the SMS right now — please try again', { smsError: r?.error });
+    store.db.otps[phone] = { hash: otpHash(phone, code), expires: t + OTP.ttlMs, tries: 0, sentAt: t, provider: r.provider };
+    store.db.otpLog[`p:${phone}`] = [...recent(`p:${phone}`), t];
+    store.db.otpLog[`ip:${ip}`] = [...recent(`ip:${ip}`), t];
     store.save();
-    return code; // send via SMS gateway (Sparrow SMS / Aakash SMS) in production
+    return { code, provider: r.provider };
   }
 
   function verifyOtp(phone, code, { name, portal = 'rider', referralCode } = {}) {
     if (!PORTALS.includes(portal)) fail(400, 'Unknown portal');
     const rec = store.db.otps[phone];
     if (!rec || rec.expires < now()) fail(400, 'OTP expired, request a new one');
-    if (++rec.tries > 5) fail(429, 'Too many attempts');
-    if (rec.code !== String(code)) fail(400, 'Wrong OTP');
+    if (++rec.tries > OTP.maxTries) { delete store.db.otps[phone]; fail(429, 'Too many wrong attempts — request a new code'); }
+    const a = Buffer.from(rec.hash, 'hex'), b = Buffer.from(otpHash(phone, String(code || '')), 'hex');
+    if (!crypto.timingSafeEqual(a, b)) { store.save(); fail(400, `Wrong code — ${OTP.maxTries - rec.tries} attempts left`); }
     delete store.db.otps[phone];
     let user = store.all('users').find((u) => u.phone === phone);
     if (portal === 'admin' && !(isAdminPhone(phone) || user?.roles.includes('admin'))) fail(403, 'This number is not an admin');
@@ -236,6 +267,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     }
     if (dues) user.dues = 0;
     store.put('trips', trip);
+    if (trip.recipient) notify(trip.recipient.phone, templates.deliveryCode({ code: trip.deliveryOtp, sender: user.name, km: r.km.toFixed(1) }), 'delivery_code');
     if (!schedule) offer(trip);
     emitTrip(trip);
     return trip;
@@ -517,6 +549,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       if (!reason) fail(400, 'Give the applicant a reason');
       app.status = decision === 'reject' ? 'rejected' : 'resubmit';
       store.save();
+      notify(app.phone, templates.kycAction(app.status, reason), 'kyc');
       return kycView(app);
     }
     if (decision !== 'approve') fail(400, 'Decision must be approve, reject or resubmit');
@@ -540,6 +573,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     app.status = 'approved';
     app.driverId = d.id;
     store.save();
+    notify(app.phone, templates.kycApproved(d.name), 'kyc');
     return kycView(app);
   }
 
