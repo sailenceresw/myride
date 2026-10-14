@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Selfie Check</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>body { padding: 16px; } .wrap { max-width: 460px; margin: 0 auto; }</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo"><span>My</span>Ride <small style="color:var(--brand-dark)">Drive</small></div>
+  <h3 style="margin:10px 0 4px">🤳 Quick selfie check</h3>
+  <p class="muted">Like Uber's Real-Time ID Check: we make sure only you drive your account. Remove helmet, mask and sunglasses, face the light.</p>
+  <div id="cam"></div>
+  <p class="muted" id="msg"></p><p class="err" id="err"></p>
+  <button class="btn" id="go">Open camera</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
+<script src="common.js"></script>
+<script src="face.js"></script>
+<script>
+// Used inside the native MyRide Drive app (WebView). Token arrives in the URL fragment so it never hits server logs.
+(() => {
+  const token = new URLSearchParams(location.hash.slice(1)).get('token');
+  const post = (m) => window.ReactNativeWebView?.postMessage(JSON.stringify(m));
+  const [go, cam, msg, err] = ['go', 'cam', 'msg', 'err'].map((id) => document.getElementById(id));
+  go.onclick = async () => {
+    go.disabled = true;
+    err.textContent = '';
+    try {
+      const r = await MRFace.captureLive(cam, { onStatus: (m) => { msg.textContent = m; } });
+      const res = await MR.api('POST', '/api/driver/face-check', { descriptor: r.descriptor, photo: r.photo }, token);
+      if (res.passed) { msg.textContent = '✅ Verified — thank you!'; post({ type: 'face_check', passed: true }); return; }
+      if (res.suspended) { err.textContent = 'We could not verify you. Your account is paused for review — call MyRide support.'; post({ type: 'face_check', passed: false, suspended: true }); return; }
+      err.textContent = 'Face did not match. Try again in better light.';
+      post({ type: 'face_check', passed: false });
+    } catch (e) { err.textContent = e.message; }
+    go.disabled = false;
+  };
+})();
+</script>
+</body>
+</html>

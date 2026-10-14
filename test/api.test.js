@@ -1,9 +1,10 @@
 // End-to-end API tests: real HTTP server, in-memory store, deterministic routing, clock and randomness.
+process.env.OTP_IP_LIMIT = '1000'; // all test logins come from 127.0.0.1
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Store } = require('../src/store');
 const { createApp } = require('../src/app');
-const { estimateRoute, places } = require('../src/geo');
+const { estimateRoute, places, navigationRoute } = require('../src/geo');
 const { esewaSign } = require('../src/payments');
 const { LOGISTICS } = require('../src/config');
 
@@ -16,6 +17,8 @@ const near = (d, eps = 0.01) => d.map((x, i) => x + (i % 2 ? eps : -eps));
 let base, server, svc, store;
 let clock = Date.parse('2026-10-14T04:00:00Z');
 let randValue = 0.99; // > 0.3 → no random selfie unless a test lowers it
+const smsSent = [];
+const smsStub = async (phone, text) => { smsSent.push({ phone, text }); return { ok: true, provider: 'console' }; }; // dev: code echoed back
 const api = async (method, path, body, token) => {
   const res = await fetch(base + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
@@ -23,6 +26,7 @@ const api = async (method, path, body, token) => {
   return { status: res.status, body: json, headers: res.headers };
 };
 const login = async (phone, name, portal = 'rider', extra = {}) => {
+  clock += 61000; // OTP resend cooldown
   const otp = (await api('POST', '/api/auth/otp', { phone })).body.devOtp;
   const r = await api('POST', '/api/auth/verify', { phone, otp, name, portal, ...extra });
   assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -50,7 +54,7 @@ let admin, rider, bikeDrv, bikeDrvRecord;
 
 test.before(async () => {
   store = new Store(null);
-  const made = createApp({ store, routeFn: async (a, b) => estimateRoute(a, b), now: () => clock, rand: () => randValue, dev: true });
+  const made = createApp({ store, routeFn: async (a, b) => estimateRoute(a, b), navRouteFn: (a, b) => navigationRoute(a, b, { fetchImpl: null }), now: () => clock, rand: () => randValue, sms: smsStub, dev: true });
   svc = made.svc;
   server = made.app.listen(0);
   await new Promise((r) => server.once('listening', r));
@@ -329,4 +333,32 @@ test('logistics quote into a hill ward recommends the 4×4 jeep; a petrol van ke
   const v = (await api('POST', '/api/admin/fleet', { type: 'van', fuel: 'petrol', plate: 'GA 2 JA 8888', model: 'Suzuki Super Carry' }, admin.token)).body;
   assert.equal(v.fuel, 'petrol');
   assert.equal(v.goodsPermit, true);
+});
+
+
+test('SMS: login codes and parcel receiver codes are actually sent by SMS; KYC approval texted to the driver', async () => {
+  assert.ok(smsSent.some((m) => m.phone === '9846000001' && /is your MyRide code/.test(m.text)));
+  const receiver = smsSent.find((m) => m.phone === '9851000000');
+  assert.ok(receiver && /Give the driver code [0-9]{4} only after/.test(receiver.text), 'truck job receiver got the delivery code');
+  assert.ok(smsSent.some((m) => m.phone === '9856000002' && /approved/.test(m.text)));
+  const log = (await api('GET', '/api/admin/sms', null, admin.token)).body;
+  assert.ok(log.length >= 3 && log.every((x) => x.ok));
+});
+
+test('navigation endpoint returns a polyline and turn-by-turn steps; needs a session', async () => {
+  assert.equal((await api('GET', '/api/navigate?from=28.209,83.9595&to=28.18787,84.01024')).status, 401);
+  const r = (await api('GET', '/api/navigate?from=28.209,83.9595&to=28.18787,84.01024', null, bikeDrv.token)).body;
+  assert.ok(r.geometry.length >= 2 && r.steps.length >= 2);
+  assert.equal(r.steps.at(-1).type, 'arrive');
+  assert.equal((await api('GET', '/api/navigate?from=bad&to=28,84', null, bikeDrv.token)).status, 400);
+});
+
+test('nearby cars: anonymous, rounded positions of idle online drivers within 3 km', async () => {
+  const r = (await api('GET', `/api/nearby?lat=${P('lakeside').lat}&lng=${P('lakeside').lng}`)).body;
+  assert.ok(Array.isArray(r));
+  for (const c of r) {
+    assert.deepEqual(Object.keys(c).sort(), ['ev', 'lat', 'lng', 'type']);
+    assert.equal(Math.round(c.lat * 1000), c.lat * 1000);
+  }
+  assert.equal((await api('GET', '/api/nearby?lat=x')).status, 400);
 });
