@@ -1,10 +1,9 @@
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
-import type MapView from 'react-native-maps';
-import { Marker, Polyline } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppMap, RoundButton } from '@/components/ui';
+import { AppMap, type MapHandle } from '@/components/AppMap';
+import { RoundButton } from '@/components/ui';
 import { api, type Point } from '@/lib/api';
 import { announcement, arrow, cumulative, formatDistance, instruction, progress, simulatedPosition, stepOffsets, type NavRoute, type NavState } from '@/lib/nav';
 import { useTheme } from '@/lib/theme';
@@ -21,13 +20,12 @@ type Props = {
 };
 type Session = { route: NavRoute; cum: number[]; offsets: number[]; startedAt: number; hint: number };
 type NavView = NavState & { pos: Fix; etaClock: string };
-const toLatLng = ([latitude, longitude]: [number, number]) => ({ latitude, longitude });
 
 /** Uber-style turn-by-turn navigation: maneuver banner, tilted camera following heading, voice, rerouting. */
 export function Navigator({ destination, destinationLabel, simulate = false, vehicleIcon = '🏍️', onPosition, onArrive, bottom }: Props) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const map = useRef<MapView>(null);
+  const map = useRef<MapHandle>(null);
   const [route, setRoute] = useState<NavRoute | null>(null);
   const [nav, setNav] = useState<NavView | null>(null);
   const [muted, setMuted] = useState(false);
@@ -71,7 +69,7 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
     o.onPosition?.(p);
     if (o.follow) {
       const c = s.offRoute ? p : s.snapped;
-      map.current?.animateCamera({ center: toLatLng([c.lat, c.lng]), heading: p.heading != null && p.heading >= 0 ? p.heading : s.heading, pitch: 55, zoom: 17.5, altitude: 380 }, { duration: 900 });
+      map.current?.flyTo(c, { heading: p.heading != null && p.heading >= 0 ? p.heading : s.heading, pitch: 55, zoom: 17.5, duration: 900 });
     }
     const speak = (text: string) => { if (!o.muted) { Speech.stop(); Speech.speak(text, { language: 'en-IN' }); } };
     const say = announcement(s, spoken.current);
@@ -88,7 +86,7 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
 
   // Real GPS drives navigation unless the emulator demo is simulating.
   const onGps = useCallback((f: Fix) => { lastFix.current = f; if (!opts.current.simulate) onFix(f); }, [onFix]);
-  const fix = useLocation('navigation', onGps);
+  useLocation('navigation', onGps);
 
   // Simulated drive along the current route at ~40 km/h (emulator demos).
   useEffect(() => {
@@ -103,7 +101,7 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
 
   useEffect(() => () => { Speech.stop(); }, []);
 
-  const coords = useMemo(() => route?.geometry.map(toLatLng) ?? [], [route]);
+  const coords = useMemo(() => route?.geometry.map(([lat, lng]) => ({ lat, lng })) ?? [], [route]);
   const segIndex = nav?.segIndex ?? 0;
   const remaining = useMemo(() => coords.slice(segIndex), [coords, segIndex]);
   const marker = nav && (nav.offRoute ? nav.pos : nav.snapped);
@@ -112,16 +110,15 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
     <View style={StyleSheet.absoluteFill}>
       <AppMap
         ref={map}
-        initialRegion={{ latitude: fix?.lat ?? destination.lat, longitude: fix?.lng ?? destination.lng, latitudeDelta: 0.03, longitudeDelta: 0.03 }}
-        showsCompass={false}
-        showsTraffic
-        onPanDrag={() => setFollow(false)}
-        mapPadding={{ top: 150, bottom: 220, left: 0, right: 0 }}
-      >
-        {remaining.length > 1 && <Polyline coordinates={remaining} strokeColor="#1a73e8" strokeWidth={8} lineCap="round" lineJoin="round" />}
-        <Marker coordinate={toLatLng([destination.lat, destination.lng])} title={destinationLabel} pinColor={t.accent} />
-        {marker && <Marker coordinate={toLatLng([marker.lat, marker.lng])} anchor={{ x: 0.5, y: 0.5 }} flat><Text style={{ fontSize: 30 }}>{vehicleIcon}</Text></Marker>}
-      </AppMap>
+        traffic
+        onUserPan={() => setFollow(false)}
+        padding={{ top: 150, bottom: 220 }}
+        lines={[{ coords: remaining, color: '#1a73e8', width: 8 }]}
+        markers={[
+          { key: 'dest', at: destination, color: t.accent, title: destinationLabel },
+          ...(marker ? [{ key: 'me', at: marker, emoji: vehicleIcon, size: 30 }] : []),
+        ]}
+      />
 
       {/* Maneuver banner */}
       <View style={[styles.banner, { top: insets.top + 8, backgroundColor: t.navBanner }]}>

@@ -1,10 +1,8 @@
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import MapView, { UrlTile, type MapViewProps } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView, type WebViewProps } from 'react-native-webview';
-import { POKHARA } from '@/lib/config';
 import { useTheme } from '@/lib/theme';
 
 export function Button({ title, onPress, kind = 'primary', disabled, loading, style }: {
@@ -92,26 +90,6 @@ export function WebScreen({ title, ...props }: { title: string } & WebViewProps)
       <BackHeader title={title} />
       <WebView mediaCapturePermissionGrantType="grant" allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} javaScriptEnabled domStorageEnabled style={{ flex: 1 }} {...props} />
     </SafeAreaView>
-  );
-}
-
-// Store builds use Google/Apple base maps (set EXPO_PUBLIC_HAS_MAPS_KEY with GOOGLE_MAPS_*_KEY). Without a key
-// (e.g. Expo Go on an emulator → Google "Authorization failure") draw free CARTO tiles instead.
-const NO_MAPS_KEY = !process.env.EXPO_PUBLIC_HAS_MAPS_KEY;
-
-/** The app's MapView: Pokhara by default, with the dev tile fallback built in. */
-export function AppMap({ children, ref, ...props }: MapViewProps & { ref?: React.Ref<MapView> }) {
-  return (
-    <MapView
-      ref={ref}
-      style={StyleSheet.absoluteFill}
-      mapType={NO_MAPS_KEY ? 'none' : 'standard'}
-      initialRegion={{ ...POKHARA, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-      {...props}
-    >
-      {NO_MAPS_KEY && <UrlTile urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png" maximumZ={19} shouldReplaceMapContent tileSize={256} />}
-      {children}
-    </MapView>
   );
 }
 

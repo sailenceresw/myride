@@ -3,11 +3,10 @@ import * as Speech from 'expo-speech';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import type MapView from 'react-native-maps';
-import { Marker } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Navigator } from '@/components/Navigator';
-import { AppMap, Button, Card, RoundButton, Row, Sheet, Txt } from '@/components/ui';
+import { AppMap, type MapHandle } from '@/components/AppMap';
+import { Button, Card, RoundButton, Row, Sheet, Txt } from '@/components/ui';
 import { api, ApiError, rs, type DriverTrip } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { call } from '@/lib/config';
@@ -29,7 +28,7 @@ export default function DriverHome() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
-  const map = useRef<MapView>(null);
+  const map = useRef<MapHandle>(null);
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [offers, setOffers] = useState<DriverTrip[]>([]);
   const [trip, setTrip] = useState<DriverTrip | null>(null);
@@ -64,7 +63,7 @@ export default function DriverHome() {
   useEffect(() => {
     if (!fix || centred.current || trip) return;
     centred.current = true;
-    map.current?.animateCamera({ center: { latitude: fix.lat, longitude: fix.lng }, zoom: 15.5, altitude: 1500 }, { duration: 700 });
+    map.current?.flyTo(fix, { zoom: 15.5 });
   }, [fix, trip]);
 
   // Report GPS while online (every ≥ 3 s) so dispatch and the rider's live map are accurate.
@@ -189,9 +188,7 @@ export default function DriverHome() {
   // ---------- home: map + GO button + offers / PIN entry ----------
   return (
     <View style={{ flex: 1 }}>
-      <AppMap ref={map} showsUserLocation showsTraffic mapPadding={{ top: 0, bottom: 260, left: 0, right: 0 }}>
-        {trip && <Marker coordinate={{ latitude: trip.pickup.lat, longitude: trip.pickup.lng }} pinColor={t.brand} />}
-      </AppMap>
+      <AppMap ref={map} user={fix} traffic padding={{ bottom: 260 }} markers={trip ? [{ key: 'pickup', at: trip.pickup, color: t.brand, title: 'Pickup' }] : []} />
 
       <View style={[styles.earn, { top: insets.top + 8, backgroundColor: t.ink }]}>
         <Text style={{ color: t.bg, fontWeight: '800', fontSize: 18 }}>{d?.driverType === 'employee' ? `${d.earnings.trips} trips` : rs(d?.earnings.today ?? 0)}</Text>
