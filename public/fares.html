@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyRide Fare Chart</title>
+  <meta name="description" content="MyRide motorcycle and car fares in Pokhara compared with the Gandaki legal maximum, Nepal's draft national cap and other apps.">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .wrap { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
+    h2 { font-size: 1.05rem; margin: 22px 0 8px; }
+    .scroll { overflow-x: auto; }
+    .rule { font-size: .9rem; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar"><div><div class="logo"><span>My</span>Ride <small style="color:var(--muted);font-size:.8rem">Fare chart · Pokhara</small></div>
+    <div class="sub">Motorcycle (मोटरसाइकल) &amp; car fares — no surge, always under the legal maximum</div></div><a class="btn ghost small" href="/">Book a ride</a></header>
+  <div id="out"><span class="spinner"></span></div>
+</div>
+<script src="common.js"></script>
+<script>
+(async () => {
+  const { api, rs, esc } = MR;
+  const f = await api('GET', '/api/fares');
+  const g = f.gandaki, fd = f.federalDraft;
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const cards = f.rows.map((r) => {
+    const comp = r.samples[0].competitors.map((c) => c.name);
+    return `<h2>${esc(r.label)} <span class="muted">· ${esc(r.labelNe)}</span></h2>
+      <div class="card"><div class="kv"><span>MyRide tariff</span><b>Rs ${r.base} + Rs ${r.perKm}/km · minimum ${rs(r.minFare)}</b></div>
+      <div class="scroll"><table><tr><th class="num">km</th><th class="num">MyRide</th><th class="num">Driver earns</th><th class="num">Gandaki max</th>${fd.applied ? '<th class="num">National draft max</th>' : ''}${comp.map((c) => `<th class="num">${esc(c)} (est.)</th>`).join('')}</tr>
+      ${r.samples.map((s) => `<tr><td class="num">${s.km}</td><td class="num"><b>${rs(s.fare)}</b></td><td class="num">${rs(s.driver)}</td><td class="num">${rs(s.gandakiMax)}</td>${fd.applied ? `<td class="num">${s.federalMax ? rs(s.federalMax) : '—'}</td>` : ''}${s.competitors.map((c) => `<td class="num ${c.estimate > s.fare ? '' : 'neg'}">${rs(c.estimate)}</td>`).join('')}</tr>`).join('')}</table></div></div>`;
+  }).join('');
+  document.getElementById('out').innerHTML = `
+    <div class="card rule"><b>Gandaki Province fare schedule (in force)</b>
+      <div class="kv"><span>Motorcycle / scooter</span><span>Rs ${g.bike.base} start + Rs ${g.bike.perKm}/km · minimum Rs ${g.bike.minFare} (first ${g.bike.minFareKm} km)</span></div>
+      <div class="kv"><span>Car</span><span>Rs ${g.car.base} start + Rs ${g.car.perKm}/km · minimum Rs ${g.car.minFare} (first ${g.car.minFareKm} km)</span></div>
+      <div class="kv"><span>Mandatory discount</span><span>${pct(g.discount.petrol)} petrol · ${pct(g.discount.ev)} electric</span></div>
+      <div class="kv"><span>Platform fee</span><span>≤ ${pct(g.maxPlatformFeeRate)}</span></div></div>
+    <div class="card rule"><b>National draft — Digital Mobility Service Operation Standards 2082</b> <span class="pill warn">${esc(fd.status)}</span>
+      <div class="kv"><span>Max rate</span><span>Rs ${fd.perKmCap.bike}/km motorcycle · Rs ${fd.perKmCap.car}/km car · at least ${fd.minChargeKm} km</span></div>
+      <div class="kv"><span>Commission</span><span>≤ ${pct(fd.maxCommission)} of each fare</span></div>
+      <div class="kv"><span>Traffic Accident Fund</span><span>${pct(fd.accidentFund.fromFare)} of fare + ${fd.accidentFund.fromPlatform * 100}% of platform income</span></div>
+      <div class="kv"><span>Night / bad weather</span><span>up to +${pct(fd.nightMaxUplift)} (MyRide does not add this)</span></div>
+      <div class="muted">${fd.applied ? 'MyRide already complies with the draft.' : 'Draft rules not applied.'}</div></div>
+    ${cards}
+    <p class="muted">Competitor figures are estimates from public reports (Kathmandu rates for apps; DoTM meter tariff Rs 50 flag-down + Rs 10 per 200 m). Fares include 5% VAT. Waiting after the free minutes is charged separately.</p>`;
+})();
+</script>
+</body>
+</html>

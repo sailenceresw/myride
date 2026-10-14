@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Trip — MyRide</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <div class="logo"><span>My</span>Ride</div>
+    <p class="sub">Someone shared their live trip with you.</p>
+    <div id="info" class="card"><span class="spinner"></span></div>
+    <p class="muted">Emergency: Police 100 · Tourist Police 1144 · Ambulance 102</p>
+  </aside>
+  <main class="map-wrap"><div id="map"></div></main>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="common.js"></script>
+<script>
+(() => {
+  const { api, $, esc } = MR;
+  const t = new URLSearchParams(location.search).get('t');
+  const map = MR.map('map');
+  let line, car;
+  function render(v) {
+    $('#info').innerHTML = `<div class="status">${esc(v.status.replace('_', ' '))}</div><div class="muted">${esc(v.service)}</div>
+      <div class="kv"><span>From</span><b>${esc(v.pickup)}</b></div><div class="kv"><span>To</span><b>${esc(v.drop)}</b></div>
+      ${v.driver ? `<div class="kv"><span>Driver</span><b>${esc(v.driver.name)}</b></div><div class="kv"><span>Vehicle</span><b>${esc(v.driver.model)} · ${esc(v.driver.plate)}</b></div>` : ''}
+      <div class="muted">Updated ${new Date(v.updatedAt).toLocaleTimeString()}</div>`;
+    if (!line) { line = L.polyline(v.geometry, { color: '#0b7a6f', weight: 5 }).addTo(map); map.fitBounds(line.getBounds(), { padding: [30, 30] }); }
+    if (v.driver?.loc) { if (!car) car = L.marker([v.driver.loc.lat, v.driver.loc.lng], { icon: MR.vehicleIcon(v.driver.type) }).addTo(map); else car.setLatLng([v.driver.loc.lat, v.driver.loc.lng]); }
+  }
+  api('GET', `/api/share/${encodeURIComponent(t)}`).then(render).catch((e) => { $('#info').textContent = e.message; });
+  MR.events(`share=${encodeURIComponent(t)}`, (m) => m.type === 'trip' && render(m.trip));
+})();
+</script>
+</body>
+</html>

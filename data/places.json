@@ -1,0 +1,371 @@
+[
+  {
+    "id": "lakeside",
+    "name": "Lakeside",
+    "category": "tourist",
+    "lat": 28.209,
+    "lng": 83.9595,
+    "ward": 6,
+    "osm": "manual correction (checked against OSM ward polygon)"
+  },
+  {
+    "id": "hallan-chowk",
+    "name": "Hallan Chowk",
+    "category": "tourist",
+    "lat": 28.21399,
+    "lng": 83.95776,
+    "ward": 6,
+    "osm": "Hallan Chowk, Baidam Road, बैदाम, Pokhara-06, Pokhara, कास्की, गण्डकी प्रदेश, 00799, नेपाल"
+  },
+  {
+    "id": "barahi-ghat",
+    "name": "Tal Barahi Ghat",
+    "category": "tourist",
+    "lat": 28.2105,
+    "lng": 83.9565,
+    "ward": 6,
+    "osm": "manual (approximate, not in Nominatim)"
+  },
+  {
+    "id": "damside",
+    "name": "Damside",
+    "category": "tourist",
+    "lat": 28.2005,
+    "lng": 83.966,
+    "ward": 6,
+    "osm": "manual correction (checked against OSM ward polygon)"
+  },
+  {
+    "id": "tourist-bus-park",
+    "name": "Tourist Bus Park",
+    "category": "transport",
+    "lat": 28.2015,
+    "lng": 83.9695,
+    "ward": 17,
+    "osm": "manual (approximate, not in Nominatim)"
+  },
+  {
+    "id": "prithvi-chowk",
+    "name": "Prithvi Chowk",
+    "category": "transport",
+    "lat": 28.20956,
+    "lng": 83.98558,
+    "ward": 9,
+    "osm": "पृथ्वी चोक, शिव टोल, Pokhara-09, Pokhara, कास्की, गण्डकी प्रदेश, 33709, नेपाल"
+  },
+  {
+    "id": "pokhara-intl-airport",
+    "name": "Pokhara International Airport",
+    "category": "transport",
+    "lat": 28.18787,
+    "lng": 84.01024,
+    "ward": 14,
+    "osm": "Pokhara International Airport, Chhinendanda-14, Pokhara-14, Pokhara, कास्की, गण्डकी प्रदेश, 33700, नेपाल"
+  },
+  {
+    "id": "old-airport",
+    "name": "Old Domestic Airport",
+    "category": "transport",
+    "lat": 28.2009,
+    "lng": 83.9821,
+    "ward": 7,
+    "osm": "manual (approximate, not in Nominatim)"
+  },
+  {
+    "id": "chipledhunga",
+    "name": "Chipledhunga",
+    "category": "commercial",
+    "lat": 28.22411,
+    "lng": 83.98624,
+    "ward": 4,
+    "osm": "Chipledhunga, Pokhara-04, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "mahendrapul",
+    "name": "Mahendrapul",
+    "category": "commercial",
+    "lat": 28.22789,
+    "lng": 83.99082,
+    "ward": 3,
+    "osm": "Mahendrapul, Pokhara-03, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "new-road",
+    "name": "New Road",
+    "category": "commercial",
+    "lat": 28.21695,
+    "lng": 83.98623,
+    "ward": 8,
+    "osm": "न्यु रोड, Pokhara-08, Pokhara, कास्की, गण्डकी प्रदेश, 77330, नेपाल"
+  },
+  {
+    "id": "srijana-chowk",
+    "name": "Srijana Chowk",
+    "category": "commercial",
+    "lat": 28.21145,
+    "lng": 83.98147,
+    "ward": 8,
+    "osm": "Srijana Chowk Bus Stop, Phewa Marg, Pokhara-08, Pokhara, कास्की, गण्डकी प्रदेश, 77330, नेपाल"
+  },
+  {
+    "id": "zero-km",
+    "name": "Zero Kilometer",
+    "category": "commercial",
+    "lat": 28.21286,
+    "lng": 83.97548,
+    "ward": 5,
+    "osm": "जीरो किलोमीटर, Pokhara-05, Pokhara, कास्की, गण्डकी प्रदेश, 97761, नेपाल"
+  },
+  {
+    "id": "bagar",
+    "name": "Bagar",
+    "category": "residential",
+    "lat": 28.24042,
+    "lng": 83.98744,
+    "ward": 1,
+    "osm": "बागर, Pokhara-01, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "bindhyabasini",
+    "name": "Bindhyabasini Temple",
+    "category": "tourist",
+    "lat": 28.23751,
+    "lng": 83.98417,
+    "ward": 2,
+    "osm": "Bindhyabasini Temple, Mitra Marg, Pokhara-02, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "gandaki-hospital",
+    "name": "Gandaki Hospital (Western Regional)",
+    "category": "hospital",
+    "lat": 28.21271,
+    "lng": 83.99836,
+    "ward": 11,
+    "osm": "Western Regional Hospital, Hospital Marg, भृकुटी टोल, Pokhara-12, Pokhara, कास्की, गण्डकी प्रदेश, 33700, नेपाल"
+  },
+  {
+    "id": "manipal-hospital",
+    "name": "Manipal Teaching Hospital",
+    "category": "hospital",
+    "lat": 28.23676,
+    "lng": 83.99605,
+    "ward": 11,
+    "osm": "Manipal Teaching Hospital, 40DR014, Pokhara-11, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "pn-campus",
+    "name": "Prithvi Narayan Campus",
+    "category": "education",
+    "lat": 28.2398,
+    "lng": 83.9933,
+    "ward": 1,
+    "osm": "manual (approximate, not in Nominatim)"
+  },
+  {
+    "id": "pokhara-university",
+    "name": "Pokhara University",
+    "category": "education",
+    "lat": 28.14407,
+    "lng": 84.08454,
+    "ward": 30,
+    "osm": "Pokhara University, Pokhara University Front Road, PU Area, Pokhara-30, Pokhara, कास्की, गण्डकी प्रदेश, 33702, नेपाल"
+  },
+  {
+    "id": "sarangkot",
+    "name": "Sarangkot Viewpoint",
+    "category": "tourist",
+    "lat": 28.24452,
+    "lng": 83.94765,
+    "ward": 18,
+    "osm": "सराङ्गकोट, Pokhara, कास्की, गण्डकी प्रदेश, 00799, नेपाल"
+  },
+  {
+    "id": "peace-pagoda",
+    "name": "World Peace Pagoda",
+    "category": "tourist",
+    "lat": 28.20102,
+    "lng": 83.94474,
+    "ward": 22,
+    "osm": "World Peace Pagoda, Peace Stupa - Dhungepani Foot Path, Pokhara-22, Pokhara, कास्की, गण्डकी प्रदेश, 33700, नेपाल"
+  },
+  {
+    "id": "davis-falls",
+    "name": "Davis Falls",
+    "category": "tourist",
+    "lat": 28.18704,
+    "lng": 83.95974,
+    "ward": 17,
+    "osm": "Devi's Fall Driving School & Pre-test Center Pvt.Ltd, Siddhartha Highway, ॐ शान्ति चोक, Pokhara-17, Pokhara, कास्की, गण्डकी प्रदेश, 37600, नेपाल"
+  },
+  {
+    "id": "gupteshwor",
+    "name": "Gupteshwor Mahadev Cave",
+    "category": "tourist",
+    "lat": 28.1883,
+    "lng": 83.96,
+    "ward": 17,
+    "osm": "manual (approximate, not in Nominatim)"
+  },
+  {
+    "id": "mountain-museum",
+    "name": "International Mountain Museum",
+    "category": "tourist",
+    "lat": 28.18951,
+    "lng": 83.98109,
+    "ward": 17,
+    "osm": "International Mountain Museum, Bagmara Marg, रातोपैरो, Pokhara-17, Pokhara, कास्की, गण्डकी प्रदेश, 37600, नेपाल"
+  },
+  {
+    "id": "mahendra-cave",
+    "name": "Mahendra Cave",
+    "category": "tourist",
+    "lat": 28.27239,
+    "lng": 83.97914,
+    "ward": 16,
+    "osm": "Mahendra Cave, Madan Ashrit Marg, अमला बिसौनी, Pokhara-16, Pokhara, कास्की, गण्डकी प्रदेश, 60600, नेपाल"
+  },
+  {
+    "id": "bat-cave",
+    "name": "Bat Cave (Chamero Gufa)",
+    "category": "tourist",
+    "lat": 28.26758,
+    "lng": 83.9757,
+    "ward": 19,
+    "osm": "Bat Cave, Madan Ashrit Marg, अमला बिसौनी, Pokhara-19, Pokhara, कास्की, गण्डकी प्रदेश, 60600, नेपाल"
+  },
+  {
+    "id": "begnas-lake",
+    "name": "Begnas Lake",
+    "category": "tourist",
+    "lat": 28.17273,
+    "lng": 84.09322,
+    "ward": 31,
+    "osm": "Open Lake Restaurent, Piple marga, Begnas Tal, Pokhara-31, Pokhara, कास्की, गण्डकी प्रदेश, 33702, नेपाल"
+  },
+  {
+    "id": "rupa-lake",
+    "name": "Rupa Lake",
+    "category": "tourist",
+    "lat": 28.1504,
+    "lng": 84.10989,
+    "ward": null,
+    "osm": "Rupa Lake, Rupa Lake Road, Talbesi, Rupa-06, Rupa, कास्की, गण्डकी प्रदेश, 33702, नेपाल"
+  },
+  {
+    "id": "talchowk",
+    "name": "Talchowk (Lekhnath)",
+    "category": "residential",
+    "lat": 28.1748,
+    "lng": 84.0559,
+    "ward": 27,
+    "osm": "manual correction (checked against OSM ward polygon)"
+  },
+  {
+    "id": "hemja",
+    "name": "Hemja",
+    "category": "residential",
+    "lat": 28.27194,
+    "lng": 83.94714,
+    "ward": 25,
+    "osm": "हेम्जा, Pokhara-25, Pokhara, कास्की, गण्डकी प्रदेश, 60600, नेपाल"
+  },
+  {
+    "id": "pumdikot",
+    "name": "Pumdikot Shiva Statue",
+    "category": "tourist",
+    "lat": 28.19874,
+    "lng": 83.92804,
+    "ward": 22,
+    "osm": "Pumdikot, Thulibidi, Pokhara-22, Pokhara, कास्की, गण्डकी प्रदेश, 00799, नेपाल"
+  },
+  {
+    "id": "batulechaur",
+    "name": "Batulechaur",
+    "category": "residential",
+    "lat": 28.26412,
+    "lng": 83.97381,
+    "ward": 19,
+    "osm": "Lamachaur Batulechaur CRV Police Station, NH03, Pokhara-19, Pokhara, कास्की, गण्डकी प्रदेश, 60600, नेपाल"
+  },
+  {
+    "id": "lamachaur",
+    "name": "Lamachaur",
+    "category": "residential",
+    "lat": 28.27027,
+    "lng": 83.97195,
+    "ward": 19,
+    "osm": "Hadeban Upabhokta Samiti , Lamachaur -19, साङ्लेपानी पोखरी, Pokhara-19, Pokhara, कास्की, गण्डकी प्रदेश, नेपाल"
+  },
+  {
+    "id": "chhorepatan",
+    "name": "Chhorepatan",
+    "category": "residential",
+    "lat": 28.1895,
+    "lng": 83.964,
+    "ward": 17,
+    "osm": "manual correction (checked against OSM ward polygon)"
+  },
+  {
+    "id": "birauta",
+    "name": "Birauta",
+    "category": "residential",
+    "lat": 28.19223,
+    "lng": 83.97152,
+    "ward": 17,
+    "osm": "Birauta Chowk, Pokhara-17, Pokhara, कास्की, गण्डकी प्रदेश, नेपाल"
+  },
+  {
+    "id": "nadipur",
+    "name": "Nadipur",
+    "category": "residential",
+    "lat": 28.23075,
+    "lng": 83.99116,
+    "ward": 3,
+    "osm": "gyan marga,nadipur, Pokhara-03, Pokhara, कास्की, गण्डकी प्रदेश, 88700, नेपाल"
+  },
+  {
+    "id": "bhadrakali",
+    "name": "Bhadrakali Temple",
+    "category": "tourist",
+    "lat": 28.21258,
+    "lng": 84.00709,
+    "ward": 12,
+    "osm": "Bhadrakali Temple, Street No 8A, Bhadrakali Jayganga Marga, भृकुटी टोल, Pokhara-12, Pokhara, कास्की, गण्डकी प्रदेश, 33709, नेपाल"
+  },
+  {
+    "id": "ramghat",
+    "name": "Ramghat",
+    "category": "residential",
+    "lat": 28.21433,
+    "lng": 83.99568,
+    "ward": 11,
+    "osm": "Ramghat Slum Area, Pokhara-11, Pokhara, कास्की, गण्डकी प्रदेश, नेपाल"
+  },
+  {
+    "id": "budhibazar",
+    "name": "Budhibazar (Lekhnath)",
+    "category": "commercial",
+    "lat": 28.18359,
+    "lng": 84.03787,
+    "ward": 26,
+    "osm": "Police Beat, Budhibazar, Prithvi Highway, Bijaypur, Pokhara-26, Pokhara, कास्की, गण्डकी प्रदेश, 33709, नेपाल"
+  },
+  {
+    "id": "sisuwa",
+    "name": "Sisuwa (Lekhnath)",
+    "category": "commercial",
+    "lat": 28.16423,
+    "lng": 84.06893,
+    "ward": 30,
+    "osm": "Dadakonaak Sisuwa Sadak, Shishuwa Mandir, Pokhara-30, Pokhara, कास्की, गण्डकी प्रदेश, 33702, नेपाल"
+  },
+  {
+    "id": "khudi",
+    "name": "Khudi (Lekhnath)",
+    "category": "residential",
+    "lat": 28.14695,
+    "lng": 84.08394,
+    "ward": 30,
+    "osm": "Khudi, Pokhara-30, Pokhara, कास्की, गण्डकी प्रदेश, 33702, नेपाल"
+  }
+]

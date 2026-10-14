@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MyRide — Pokhara</title>
+  <meta name="description" content="Book motorcycle, car and EV rides, send parcels or move goods anywhere in Pokhara (wards 1–33, incl. Lekhnath) at fair, capped fares.">
+  <meta name="theme-color" content="#0b7a6f">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <header class="bar">
+      <div>
+        <div class="logo"><span>My</span>Ride <span id="plusBadge" class="pill hidden" style="background:var(--accent);color:#1d1405">PLUS</span></div>
+        <div class="sub" data-i18n="tagline">Pokhara's fair-fare rides, parcels &amp; logistics</div>
+      </div>
+      <div class="row shrink">
+        <button class="icon-btn" id="lang" title="Language">नेपाली</button>
+        <button class="icon-btn hidden" id="logout" title="Log out">⎋</button>
+      </div>
+    </header>
+
+    <section id="login"></section>
+
+    <section id="book" class="hidden">
+      <div class="tabs" role="tablist">
+        <button class="on" data-kind="ride" data-i18n="ride">Ride</button>
+        <button data-kind="delivery" data-i18n="delivery">Parcel</button>
+        <button data-kind="logistics" data-i18n="logistics">Logistics</button>
+        <button data-kind="history" data-i18n="history">Trips</button>
+        <button data-kind="account" data-i18n="account">Account</button>
+      </div>
+
+      <div id="planner">
+        <div id="freeBanner" class="card hidden" style="border-color:var(--ok)"><b class="pos">🎁 Your first trip is free</b> <span class="muted">— up to Rs 100 off, applied automatically.</span></div>
+        <label for="from" data-i18n="pickup">Pickup</label>
+        <div class="row">
+          <input id="from" list="placeList" placeholder="Landmark, ward (e.g. Ward 27) or tap map">
+          <button class="icon-btn shrink" id="locate" title="Use my location">📍</button>
+        </div>
+        <div class="muted" id="fromWard"></div>
+        <label for="to" data-i18n="drop">Drop</label>
+        <input id="to" list="placeList" placeholder="Where to?">
+        <div class="muted" id="toWard"></div>
+        <datalist id="placeList"></datalist>
+
+        <div id="popular" class="card">
+          <div class="muted" style="margin-bottom:6px" data-i18n="fixed">Fixed tourist fares (never more)</div>
+          <div class="chips" id="fixedChips"></div>
+          <a class="muted" href="/fares.html" style="display:inline-block;margin-top:8px">See full motorcycle &amp; car fare chart →</a>
+        </div>
+
+        <div id="intercity" class="card hidden">
+          <div class="muted" style="margin-bottom:6px">Intercity lanes from Pokhara</div>
+          <div class="chips" id="laneChips"></div>
+        </div>
+
+        <div id="parcelForm" class="hidden">
+          <div class="row">
+            <div><label for="pw" data-i18n="weight">Weight (kg)</label><input id="pw" type="number" min="0.1" step="0.1" value="1"></div>
+            <div id="sizeWrap"><label for="psize">Size</label>
+              <select id="psize"><option value="small">Small (envelope / box)</option><option value="medium">Medium (≤ 40×40×40 cm)</option></select></div>
+            <div id="goodsWrap" class="hidden"><label for="gtype">Goods</label><select id="gtype"></select></div>
+          </div>
+          <label for="pdesc">What are you sending?</label><input id="pdesc" maxlength="120" placeholder="e.g. documents, furniture, cement bags">
+          <div class="row">
+            <div><label for="rname">Receiver name</label><input id="rname" maxlength="60"></div>
+            <div><label for="rphone">Receiver mobile</label><input id="rphone" inputmode="numeric" maxlength="10" placeholder="98XXXXXXXX"></div>
+          </div>
+          <div id="parcelOnly">
+            <label for="cod">Cash on delivery to collect (Rs, optional)</label><input id="cod" type="number" min="0" max="50000" value="0">
+            <label class="check"><input type="checkbox" id="fragile"> Fragile (+Rs 20)</label>
+          </div>
+          <div id="logiOnly" class="hidden">
+            <div class="row">
+              <div><label for="helpers">Loading helpers (Rs 800 each)</label><input id="helpers" type="number" min="0" max="6" value="0"></div>
+              <div><label for="dval">Goods value (Rs)</label><input id="dval" type="number" min="0" value="0"></div>
+            </div>
+            <label class="check"><input type="checkbox" id="insure"> Goods-in-transit insurance (0.3%, min Rs 100)</label>
+          </div>
+        </div>
+
+        <p class="err" id="qerr"></p>
+        <div id="quotes"></div>
+
+        <div id="options" class="hidden">
+          <div class="row">
+            <div><label for="pay" data-i18n="payment">Payment</label>
+              <select id="pay"><option value="cash">Cash</option><option value="esewa">eSewa</option><option value="khalti">Khalti</option></select></div>
+            <div><label for="promo">Promo code</label><input id="promo" placeholder="FREERIDE" maxlength="16"></div>
+          </div>
+          <label class="check" id="creditsWrap"><input type="checkbox" id="useCredits" checked> <span id="creditsLbl">Use MyRide credits</span></label>
+          <label class="check" id="womenWrap"><input type="checkbox" id="women"> <span data-i18n="women">Prefer a woman driver</span></label>
+          <label class="check"><input type="checkbox" id="schedOn"> <span data-i18n="schedule">Schedule for later</span></label>
+          <input id="schedAt" type="datetime-local" class="hidden">
+          <label for="note">Note for driver (optional)</label><input id="note" maxlength="200" placeholder="e.g. I'm at the hotel gate">
+          <p class="err" id="berr"></p>
+          <button class="btn" id="bookBtn" data-i18n="book">Book</button>
+        </div>
+      </div>
+
+      <div id="history" class="hidden"></div>
+      <div id="account" class="hidden"></div>
+    </section>
+
+    <section id="tripView" class="hidden"></section>
+  </aside>
+
+  <main class="map-wrap">
+    <div id="map"></div>
+    <div class="map-hint" id="hint">Tap the map to set pickup</div>
+    <button class="sos hidden" id="sosBtn">SOS</button>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="common.js"></script>
+<script src="rider.js"></script>
+</body>
+</html>
