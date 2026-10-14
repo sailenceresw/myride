@@ -53,9 +53,14 @@ function startSimulator({ store, svc, routeFn }) {
       d.ratingCount = 20 + i * 3;
     }
     const p = places.find((x) => x.id === at);
-    d.status = 'idle'; d.currentTripId = null; d.offerTripId = null;
-    svc.setOnline(user, true, { lat: p.lat + (Math.random() - 0.5) * 0.004, lng: p.lng + (Math.random() - 0.5) * 0.004 });
-    sims.push({ user, driverId: d.id, leg: null, home: { lat: p.lat, lng: p.lng } });
+    // Demo drivers start every simulator session on a fresh shift (the 12-hour rule still applies to real drivers).
+    Object.assign(d, { status: 'idle', currentTripId: null, offerTripId: null, online: false, onlineSince: null, onlineMinutesToday: 0 });
+    try {
+      svc.setOnline(user, true, { lat: p.lat + (Math.random() - 0.5) * 0.004, lng: p.lng + (Math.random() - 0.5) * 0.004 });
+      sims.push({ user, driverId: d.id, leg: null, home: { lat: p.lat, lng: p.lng } });
+    } catch (e) {
+      console.error(`sim: ${name} could not go online — ${e.message}`); // never take the server down
+    }
   });
 
   const step = async (sim) => {
