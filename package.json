@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node scripts/test.js",
     "start": "node server.js",
     "dev": "node server.js --dev"
   },
@@ -17,5 +17,8 @@
   "description": "MyRide - ride-hailing and delivery for Pokhara, Nepal",
   "dependencies": {
     "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

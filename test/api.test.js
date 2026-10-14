@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Store } = require('../src/store');
 const { createApp } = require('../src/app');
-const { estimateRoute, places } = require('../src/geo');
+const { estimateRoute, places, navigationRoute } = require('../src/geo');
 const { esewaSign } = require('../src/payments');
 const { LOGISTICS } = require('../src/config');
 
@@ -16,9 +16,9 @@ const near = (d, eps = 0.01) => d.map((x, i) => x + (i % 2 ? eps : -eps));
 
 let base, server, svc, store;
 let clock = Date.parse('2026-10-14T04:00:00Z');
-let randValue = 0.99;
+let randValue = 0.99; // > 0.3 → no random selfie unless a test lowers it
 const smsSent = [];
-const smsStub = async (phone, text) => { smsSent.push({ phone, text }); return { ok: true, provider: 'test' }; }; // > 0.3 → no random selfie unless a test lowers it
+const smsStub = async (phone, text) => { smsSent.push({ phone, text }); return { ok: true, provider: 'test' }; };
 const api = async (method, path, body, token) => {
   const res = await fetch(base + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
@@ -54,7 +54,7 @@ let admin, rider, bikeDrv, bikeDrvRecord;
 
 test.before(async () => {
   store = new Store(null);
-  const made = createApp({ store, routeFn: async (a, b) => estimateRoute(a, b), now: () => clock, rand: () => randValue, sms: smsStub, dev: true });
+  const made = createApp({ store, routeFn: async (a, b) => estimateRoute(a, b), navRouteFn: (a, b) => navigationRoute(a, b, { fetchImpl: null }), now: () => clock, rand: () => randValue, sms: smsStub, dev: true });
   svc = made.svc;
   server = made.app.listen(0);
   await new Promise((r) => server.once('listening', r));

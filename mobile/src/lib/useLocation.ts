@@ -9,13 +9,14 @@ export type Fix = { lat: number; lng: number; heading: number | null; speed: num
  * `mode: 'normal'` = Balanced every ~5 s / 15 m. Falls back to central Pokhara if permission is denied.
  * `onFix` runs inside the GPS callback for each new position (use it for per-fix work like navigation).
  */
-export function useLocation(mode: 'navigation' | 'normal' = 'normal', onFix?: (f: Fix) => void) {
+export function useLocation(mode: 'navigation' | 'normal' = 'normal', onFix?: (f: Fix) => void, enabled = true) {
   const [fix, setFix] = useState<Fix | null>(null);
   const [denied, setDenied] = useState(false);
   const cb = useRef(onFix);
   useEffect(() => { cb.current = onFix; }, [onFix]);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
     const emit = (f: Fix) => { if (!cancelled) { setFix(f); cb.current?.(f); } };
@@ -35,7 +36,7 @@ export function useLocation(mode: 'navigation' | 'normal' = 'normal', onFix?: (f
       if (cancelled) s.remove(); else sub = s;
     })().catch(() => setDenied(true));
     return () => { cancelled = true; sub?.remove(); };
-  }, [mode]);
+  }, [mode, enabled]);
 
   return { fix, denied };
 }

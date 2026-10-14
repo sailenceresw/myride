@@ -55,6 +55,8 @@ test('failover: Sparrow fails → Aakash delivers; no provider configured → cl
   });
   assert.equal((await sendSms('12345', 'x')).ok, false);
   assert.equal(toLocal('+9779846000001'), '9846000001');
+  assert.equal(toLocal('977-9846000001'), '9846000001');
+  assert.equal(toLocal('9771234567'), '9771234567', 'a local 977… number keeps all 10 digits');
 });
 
 test('OTP template: 6-digit code first (Android SMS Retriever <#> prefix), under 160 chars, app hash appended', async () => {
@@ -109,6 +111,28 @@ test('OTP limits: 60 s resend cooldown, 5 per hour per number, 5 wrong tries, pe
 
 test('if the SMS gateway fails, the user gets a retryable error and no OTP is stored', async () => {
   const { svc, store } = svcWith({ smsOk: false });
-  await assert.rejects(svc.requestOtp('9846000003', { ip: 'x' }), (e) => e.status === 502);
+  await assert.rejects(svc.requestOtp('9846000003', { ip: 'x' }), (e) => e.status === 503 && e.extra.expose && /try again/.test(e.message));
   assert.equal(store.db.otps['9846000003'], undefined);
+});
+
+test('concurrent OTP requests for one number send only one SMS (limits reserved before sending)', async () => {
+  const { svc, sent } = svcWith();
+  const results = await Promise.allSettled(Array.from({ length: 20 }, () => svc.requestOtp('9846000077', { ip: 'race' })));
+  assert.equal(sent.length, 1);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.ok(results.filter((r) => r.status === 'rejected').every((r) => r.reason.status === 429));
+});
+
+test('old plain-code OTP records are treated as expired instead of crashing', () => {
+  const { svc, store } = svcWith();
+  store.db.otps['9846000088'] = { code: '123456', expires: Date.parse('2026-10-14T06:00:00Z'), tries: 0 };
+  assert.throws(() => svc.verifyOtp('9846000088', '123456'), (e) => e.status === 400 && /expired/.test(e.message));
+});
+
+test('production without an SMS gateway fails loudly instead of logging codes', async () => {
+  await withEnv({ NODE_ENV: 'production', SMS_PROVIDER: null, SMS_FALLBACK: null }, async () => {
+    const r = await sendSms('9846000001', 'x');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /No SMS provider configured/);
+  });
 });

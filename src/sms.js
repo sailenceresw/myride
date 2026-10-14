@@ -11,7 +11,8 @@
 const SPARROW_URL = process.env.SPARROW_URL || 'https://api.sparrowsms.com/v2/sms/';
 const AAKASH_URL = process.env.AAKASH_URL || 'https://sms.aakashsms.com/sms/v3/send';
 
-const toLocal = (phone) => String(phone).replace(/^\+?977/, '').replace(/\D/g, '');
+// "+977 98…", "977-98…", "98…" → "98…" (only a 13-digit number carries the 977 country code).
+const toLocal = (phone) => { const d = String(phone).replace(/\D/g, ''); return d.length === 13 && d.startsWith('977') ? d.slice(3) : d; };
 
 const PROVIDERS = {
   console: {
@@ -50,7 +51,8 @@ const PROVIDERS = {
 };
 
 function chain() {
-  const primary = process.env.SMS_PROVIDER || 'console';
+  // Production never silently falls back to printing codes to the log: configure a real gateway.
+  const primary = process.env.SMS_PROVIDER || (process.env.NODE_ENV === 'production' ? '' : 'console');
   const list = [primary, process.env.SMS_FALLBACK].filter((p, i, a) => p && PROVIDERS[p] && a.indexOf(p) === i);
   return list.filter((p) => PROVIDERS[p].configured());
 }
@@ -77,7 +79,7 @@ async function sendSms(phone, text, opts = {}) {
   return { ok: false, error: attempts.at(-1)?.error || 'SMS failed', attempts };
 }
 
-const isConsole = () => (process.env.SMS_PROVIDER || 'console') === 'console';
+const isConsole = () => process.env.NODE_ENV !== 'production' && (process.env.SMS_PROVIDER || 'console') === 'console';
 
 // Message templates (≤ 160 GSM chars). OTP format works with Android SMS Retriever and iOS one-time-code auto-fill.
 const templates = {

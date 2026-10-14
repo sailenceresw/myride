@@ -18,7 +18,7 @@ type Props = {
   onArrive?: () => void;
   bottom?: ReactNode;
 };
-type Active = { route: NavRoute; cum: number[]; offsets: number[]; startedAt: number };
+type Active = { route: NavRoute; cum: number[]; offsets: number[]; startedAt: number; hint: number };
 type View3 = NavState & { segIndex: number; pos: { lat: number; lng: number }; etaClock: string };
 
 /** Uber-style turn-by-turn navigation: maneuver banner, tilted camera following heading, voice, rerouting. */
@@ -48,7 +48,8 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
     setRerouting(true);
     api<NavRoute>('GET', `/api/navigate?from=${from.lat},${from.lng}&to=${destination.lat},${destination.lng}`)
       .then((r) => {
-        active.current = { route: r, cum: cumulative(r.geometry), offsets: stepOffsets(r), startedAt: Date.now() };
+        const cum = cumulative(r.geometry);
+        active.current = { route: r, cum, offsets: stepOffsets(r, cum), startedAt: Date.now(), hint: 0 };
         spoken.current = new Set();
         setRoute(r);
       })
@@ -60,7 +61,8 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
   const onFix = useCallback((p: { lat: number; lng: number; heading: number | null }) => {
     const a = active.current;
     if (!a) { fetchRoute(p); return; }
-    const s = progress(a.route, p, { cum: a.cum, offsets: a.offsets });
+    const s = progress(a.route, p, { cum: a.cum, offsets: a.offsets, hintIndex: a.hint });
+    a.hint = s.segIndex; // keep searching forward: no snapping back on hairpins / out-and-back roads
     const o = opts.current;
     setNav({ ...s, pos: p, etaClock: new Date(Date.now() + s.remainingMin * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
     o.onPosition?.(p);
