@@ -85,29 +85,47 @@ function estimateRoute(a, b) {
 const cache = new Map();
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 
-// Real road route via OSRM; falls back to straight-line × measured detour factor if OSRM is unreachable.
-async function route(a, b, { fetchImpl = globalThis.fetch, timeoutMs = 4000 } = {}) {
-  const key = [a.lat, a.lng, b.lat, b.lng].map((n) => n.toFixed(5)).join(',');
+const toStep = (s) => ({
+  type: s.maneuver.type, modifier: s.maneuver.modifier || '', exit: s.maneuver.exit, name: s.name || s.ref || '',
+  distance: s.distance, duration: s.duration * CITY.trafficFactor, location: [s.maneuver.location[1], s.maneuver.location[0]],
+});
+
+// Real road route via OSRM (cached); `steps: true` adds turn-by-turn maneuvers. Returns null if OSRM is unavailable.
+async function osrm(a, b, { steps = false, fetchImpl = globalThis.fetch, timeoutMs = 4000 } = {}) {
+  if (process.env.MYRIDE_OFFLINE === '1' || !fetchImpl) return null;
+  const key = [a.lat, a.lng, b.lat, b.lng].map((n) => n.toFixed(5)).join(',') + (steps ? ':s' : '');
   if (cache.has(key)) return cache.get(key);
-  if (process.env.MYRIDE_OFFLINE === '1' || !fetchImpl) return estimateRoute(a, b);
   try {
-    const url = `${OSRM}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
+    const url = `${OSRM}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson${steps ? '&steps=true' : ''}`;
     const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers: { 'User-Agent': 'MyRide/0.1' } });
     const json = await res.json();
-    if (json.code !== 'Ok' || !json.routes?.length) return estimateRoute(a, b);
+    if (json.code !== 'Ok' || !json.routes?.length) return null;
     const r = json.routes[0];
     const out = {
       km: r.distance / 1000,
       min: Math.max((r.duration / 60) * CITY.trafficFactor, 1),
       geometry: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+      ...(steps && { steps: r.legs.flatMap((leg) => leg.steps).map(toStep) }),
       source: 'osrm',
     };
     if (cache.size > 5000) cache.clear();
     cache.set(key, out);
     return out;
   } catch {
-    return estimateRoute(a, b);
+    return null;
   }
+}
+
+// Road route; falls back to straight line × the measured 1.33 detour factor.
+const route = async (a, b, opts) => (await osrm(a, b, opts)) ?? estimateRoute(a, b);
+
+// Turn-by-turn route for in-app navigation; the fallback is a single "head to" step.
+async function navigationRoute(a, b, opts) {
+  const r = await osrm(a, b, { timeoutMs: 6000, ...opts, steps: true });
+  if (r) return r;
+  const e = estimateRoute(a, b);
+  const step = (type, modifier, p, distance = 0, duration = 0) => ({ type, modifier, name: '', distance, duration, location: [p.lat, p.lng] });
+  return { ...e, steps: [step('depart', 'straight', a, e.km * 1000, e.min * 60), step('arrive', '', b)] };
 }
 
 function nearestPlace(p, maxKm = 0.6) {
@@ -141,4 +159,4 @@ function alongPolyline(geometry, t) {
   }
 }
 
-module.exports = { haversineKm, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, estimateRoute, route, nearestPlace, alongPolyline, places };
+module.exports = { haversineKm, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, navigationRoute, estimateRoute, route, nearestPlace, alongPolyline, places };

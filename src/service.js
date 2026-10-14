@@ -3,42 +3,89 @@ const crypto = require('crypto');
 const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC } = require('./config');
 const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, nearestPlace, places } = require('./geo');
 const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
-const { findCandidates, canServe, hoursLeftToday } = require('./dispatch');
+const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
 const rewards = require('./rewards');
 const kyc = require('./kyc');
 const payroll = require('./payroll');
+const { sendSms, templates, PHONE_RE } = require('./sms');
 
-const PHONE_RE = /^9[678]\d{8}$/; // Nepal mobile: 98x/97x (NTC, Ncell), 96x (Smart)
 const ACTIVE = ['searching', 'accepted', 'arrived', 'in_progress'];
 const MAX_OFFER_ROUNDS = 3;
 const PORTALS = ['rider', 'driver', 'admin'];
 
+// `expose`: show the message to clients even for 5xx (default: only 4xx messages are shown).
 class HttpError extends Error {
-  constructor(status, message, extra) { super(message); this.status = status; if (extra) this.extra = extra; }
+  constructor(status, message, extra, expose = status < 500) { super(message); Object.assign(this, { status, expose }); if (extra) this.extra = extra; }
 }
-const fail = (status, msg, extra) => { throw new HttpError(status, msg, extra); };
+const fail = (status, msg, extra, expose) => { throw new HttpError(status, msg, extra, expose); };
 const pin4 = () => String(crypto.randomInt(1000, 10000));
 const r2 = (n) => Math.round(n * 100) / 100;
 const kindOf = (svc) => (svc.kind === 'ride' ? 'ride' : svc.logistics ? 'logistics' : 'delivery');
 
-function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random }) {
-  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files']) if (!store.db[c]) store.db[c] = {};
+const OTP = {
+  ttlMs: 5 * 60 * 1000,
+  resendMs: 60 * 1000, // one SMS per number per minute
+  perPhonePerHour: 5,
+  perIpPerHour: +process.env.OTP_IP_LIMIT || 20,
+  maxTries: 5,
+};
+
+function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
+  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog']) if (!store.db[c]) store.db[c] = {};
+  if (!Array.isArray(store.db.smsLog)) store.db.smsLog = [];
+  const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
+
+  // Fire-and-forget notification SMS; outcome logged for ops (newest 500 kept).
+  function notify(phone, text, kind) {
+    Promise.resolve(sms(phone, text)).then((r) => {
+      store.db.smsLog.push({ at: now(), phone, kind, ok: !!r?.ok, provider: r?.provider, error: r?.error });
+      if (store.db.smsLog.length > 500) store.db.smsLog.shift();
+      store.save();
+    }).catch(() => {});
+  }
+  const smsLog = (n = 100) => store.db.smsLog.slice(-n).reverse();
+
+  // Sliding one-hour window per key; empty windows are deleted so the log can't grow without bound.
+  function windowOf(key, t) {
+    const w = (store.db.otpLog[key] || []).filter((x) => t - x < 3600000);
+    if (w.length) store.db.otpLog[key] = w; else delete store.db.otpLog[key];
+    return w;
+  }
 
   // ---------- auth: one identity, separate portals (like Uber's rider app vs Driver app) ----------
-  function requestOtp(phone) {
+  // OTP by SMS: rate-limited per number and per IP; only an HMAC of the code is stored.
+  // Limits are reserved *before* the SMS is sent so concurrent requests can't slip past them.
+  async function requestOtp(phone, { ip = 'unknown' } = {}) {
     if (!PHONE_RE.test(String(phone || ''))) fail(400, 'Enter a valid Nepali mobile number (98XXXXXXXX)');
+    const t = now();
+    const prev = store.db.otps[phone];
+    if (prev && t - prev.sentAt < OTP.resendMs) fail(429, `Please wait ${Math.ceil((OTP.resendMs - (t - prev.sentAt)) / 1000)} s before requesting another code`);
+    const byPhone = windowOf(`p:${phone}`, t), byIp = windowOf(`ip:${ip}`, t);
+    if (byPhone.length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
+    if (byIp.length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
     const code = String(crypto.randomInt(100000, 1000000));
-    store.db.otps[phone] = { code, expires: now() + 5 * 60 * 1000, tries: 0 };
+    const rec = { hash: otpHash(phone, code), expires: t + OTP.ttlMs, tries: 0, sentAt: t };
+    store.db.otps[phone] = rec;
+    store.db.otpLog[`p:${phone}`] = [...byPhone, t];
+    store.db.otpLog[`ip:${ip}`] = [...byIp, t];
+    const r = await sms(phone, templates.otp(code));
+    if (!r?.ok) {
+      if (store.db.otps[phone] === rec) delete store.db.otps[phone]; // release the reservation; quota stays spent
+      console.error(`[otp] SMS to ${phone} failed: ${r?.error}`);
+      fail(503, 'Could not send the SMS right now — please try again in a minute', null, true);
+    }
+    rec.provider = r.provider;
     store.save();
-    return code; // send via SMS gateway (Sparrow SMS / Aakash SMS) in production
+    return { code, provider: r.provider };
   }
 
   function verifyOtp(phone, code, { name, portal = 'rider', referralCode } = {}) {
     if (!PORTALS.includes(portal)) fail(400, 'Unknown portal');
     const rec = store.db.otps[phone];
-    if (!rec || rec.expires < now()) fail(400, 'OTP expired, request a new one');
-    if (++rec.tries > 5) fail(429, 'Too many attempts');
-    if (rec.code !== String(code)) fail(400, 'Wrong OTP');
+    if (!rec?.hash || rec.expires < now()) fail(400, 'OTP expired, request a new one'); // also old plain-code records
+    if (++rec.tries > OTP.maxTries) { delete store.db.otps[phone]; fail(429, 'Too many wrong attempts — request a new code'); }
+    const a = Buffer.from(rec.hash, 'hex'), b = Buffer.from(otpHash(phone, String(code || '')), 'hex');
+    if (!crypto.timingSafeEqual(a, b)) { store.save(); fail(400, `Wrong code — ${OTP.maxTries - rec.tries} attempts left`); }
     delete store.db.otps[phone];
     let user = store.all('users').find((u) => u.phone === phone);
     if (portal === 'admin' && !(isAdminPhone(phone) || user?.roles.includes('admin'))) fail(403, 'This number is not an admin');
@@ -236,6 +283,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     }
     if (dues) user.dues = 0;
     store.put('trips', trip);
+    if (trip.recipient) notify(trip.recipient.phone, templates.deliveryCode({ code: trip.deliveryOtp, sender: user.name, km: r.km.toFixed(1) }), 'delivery_code');
     if (!schedule) offer(trip);
     emitTrip(trip);
     return trip;
@@ -517,6 +565,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       if (!reason) fail(400, 'Give the applicant a reason');
       app.status = decision === 'reject' ? 'rejected' : 'resubmit';
       store.save();
+      notify(app.phone, templates.kycAction(app.status, reason), 'kyc');
       return kycView(app);
     }
     if (decision !== 'approve') fail(400, 'Decision must be approve, reject or resubmit');
@@ -540,6 +589,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     app.status = 'approved';
     app.driverId = d.id;
     store.save();
+    notify(app.phone, templates.kycApproved(d.name), 'kyc');
     return kycView(app);
   }
 
@@ -733,6 +783,15 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   // ---------- admin ----------
+  // Uber-style "cars around you": available drivers within 3 km, position rounded to ~100 m, no identities.
+  function nearbyDrivers(p) {
+    const t = now(), round = (x) => Math.round(x * 1000) / 1000;
+    return store.all('drivers')
+      .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
+      .slice(0, 25)
+      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev' }));
+  }
+
   function stats() {
     const trips = store.all('trips');
     const done = trips.filter((t) => t.status === 'completed');
@@ -782,7 +841,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   return {
-    requestOtp, verifyOtp, session, userFromToken, profile, updateProfile, applyReferral,
+    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, applyReferral,
     createMembershipOrder, startTrial, markOrderPaid, cancelMembership,
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,

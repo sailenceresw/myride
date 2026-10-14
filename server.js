@@ -4,6 +4,12 @@ const { createApp } = require('./src/app');
 const { route } = require('./src/geo');
 const { startSimulator } = require('./src/simulator');
 
+// `node server.js --dev` = demo mode on any OS (Windows cmd can't do `VAR=1 node …` in npm scripts).
+if (process.argv.includes('--dev')) {
+  process.env.SIMULATE ??= '1';
+  process.env.MYRIDE_AUTO_VERIFY ??= '1';
+}
+
 const PORT = +process.env.PORT || 3000;
 const store = new Store(process.env.MYRIDE_DB || path.join(__dirname, 'data', 'db.json'));
 const { app, svc } = createApp({ store, routeFn: route, uploadsDir: process.env.MYRIDE_UPLOADS || path.join(__dirname, 'data', 'uploads') });
