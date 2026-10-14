@@ -13,6 +13,7 @@ import { useAuth } from '@/lib/auth';
 import { call } from '@/lib/config';
 import { useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
+import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 
 type Driver = {
@@ -41,6 +42,7 @@ export default function DriverHome() {
   const d = dash?.driver ?? null;
   const navigating = !!trip && trip.status !== 'arrived'; // the Navigator runs its own GPS watcher
   const fix = useLocation(d?.online ? 'tracking' : 'normal', undefined, !navigating);
+  const dropOffer = useCallback(() => setOffers((x) => x.slice(1)), []); // the first offer timed out
   const promptedCheck = useRef<number | undefined>(undefined);
   const lastSent = useRef(0);
 
@@ -73,19 +75,25 @@ export default function DriverHome() {
   }, []);
   useEffect(() => { if (d?.online && fix && !trip) report(fix); }, [fix, d?.online, trip, report]);
 
-  // While online: refresh the current trip, or look for offers.
-  usePolling(async () => {
-    if (trip) {
-      const next = await api<DriverTrip>('GET', `/api/trips/${trip.id}`);
-      const still = ON_TRIP.includes(next.status);
-      setTrip(still ? next : null);
-      if (!still) load();
-      return;
-    }
-    const o = await api<DriverTrip[]>('GET', '/api/driver/offers');
+  // While online: offers and trip changes arrive live over SSE; a slow poll covers dropped connections.
+  const showOffers = (o: DriverTrip[]) => {
     if (o.length && !offers.length) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {}); Speech.speak('New trip request'); }
     setOffers(o);
-  }, 3000, !!d?.online);
+  };
+  const tripChanged = (next: DriverTrip) => {
+    const still = ON_TRIP.includes(next.status);
+    setTrip(still ? next : null);
+    if (!still) load();
+  };
+  useEvents((e) => {
+    if (e.type === 'offer' && !trip) showOffers([e.trip, ...offers.filter((x) => x.id !== e.trip.id)]);
+    else if (e.type === 'trip' && e.role === 'driver' && e.trip.id === trip?.id) tripChanged(e.trip);
+    else if (e.type === 'face_check') load(); // load() opens the selfie screen
+  }, !!d?.online);
+  usePolling(async () => {
+    if (trip) tripChanged(await api<DriverTrip>('GET', `/api/trips/${trip.id}`));
+    else showOffers(await api<DriverTrip[]>('GET', '/api/driver/offers'));
+  }, 10000, !!d?.online);
 
   /** Busy/error handling for every driver action; a 428 means "selfie check first". */
   async function run(fn: () => Promise<unknown>) {
@@ -210,7 +218,7 @@ export default function DriverHome() {
               {trip.riderPhone && <Button title={`Call ${trip.riderName}`} kind="ghost" onPress={() => call(trip.riderPhone)} style={{ marginTop: 6 }} />}
             </>
           ) : offers[0] ? (
-            <OfferCard o={offers[0]} onAccept={() => accept(offers[0])} />
+            <OfferCard key={offers[0].id} o={offers[0]} onAccept={() => accept(offers[0])} onExpire={dropOffer} />
           ) : (
             <>
               <Row style={{ justifyContent: 'space-between' }}>
@@ -232,11 +240,12 @@ export default function DriverHome() {
   );
 }
 
-function OfferCard({ o, onAccept }: { o: DriverTrip; onAccept: () => void }) {
+function OfferCard({ o, onAccept, onExpire }: { o: DriverTrip; onAccept: () => void; onExpire: () => void }) {
   const t = useTheme();
   const left = useCallback(() => Math.max(0, Math.round((o.offerExpiresAt - Date.now()) / 1000)), [o.offerExpiresAt]);
   const [secs, setSecs] = useState(left);
   useEffect(() => { const id = setInterval(() => setSecs(left()), 1000); return () => clearInterval(id); }, [left]);
+  useEffect(() => { if (secs === 0) onExpire(); }, [secs, onExpire]);
   return (
     <Card style={{ borderColor: t.accent, borderWidth: 2 }}>
       <Row style={{ justifyContent: 'space-between' }}>

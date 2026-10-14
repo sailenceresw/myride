@@ -11,7 +11,7 @@ export const getApiToken = () => token;
 /** Absolute URL on the MyRide server (API calls, share links, web pages opened in-app). */
 export const apiUrlFor = (path: string) => `${API_URL}${path}`;
 
-export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, body?: unknown): Promise<T> {
+export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const res = await fetch(apiUrlFor(path), {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },

@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth';
 import { call, POLICE } from '@/lib/config';
 import { useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
+import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 
 type Kind = 'ride' | 'delivery' | 'logistics';
@@ -70,11 +71,14 @@ export default function RiderHome() {
     api<Trip[]>('GET', '/api/trips').then((l) => setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? null)).catch(() => {});
   }, []);
 
-  usePolling(async () => {
-    const next = await api<Trip>('GET', `/api/trips/${trip!.id}`);
-    if (next.status !== trip!.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  // Live trip updates arrive over SSE; the slow poll only covers a dropped connection.
+  const live = !!trip && ACTIVE.includes(trip.status);
+  const update = (next: Trip) => {
+    if (next.status !== trip?.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTrip(next);
-  }, 3000, !!trip && ACTIVE.includes(trip.status));
+  };
+  useEvents((e) => { if (e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
+  usePolling(async () => update(await api<Trip>('GET', `/api/trips/${trip!.id}`)), 15000, live);
 
   usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${pickup!.lat}&lng=${pickup!.lng}`)), 8000, !trip && !!pickup);
 

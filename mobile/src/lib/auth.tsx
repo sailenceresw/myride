@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Platform } from 'react-native';
 import { api, ApiError, setApiToken } from './api';
 import { VARIANT } from './config';
+import { registerPush, unregisterPush } from './push';
 
 // Each store app signs in to its own portal: MyRide → "rider", MyRide Drive → "driver" (separate sessions, like Uber).
 const PORTAL = VARIANT === 'driver' ? 'driver' : 'rider';
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await api<{ portal: string; user: Profile }>('GET', '/api/me');
       if (me.portal !== PORTAL) throw new ApiError(403, 'wrong portal');
       setProfile(me.user);
+      registerPush();
     } catch (e) {
       // Only a rejected session signs the user out — offline / server restarts keep the token.
       if (e instanceof ApiError && [401, 403].includes(e.status)) { await storage.del(); setApiToken(null); setToken(null); }
@@ -66,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await load(r.token);
     },
     refresh: () => load(token),
-    signOut: async () => { await storage.del(); await load(null); router.replace('/login'); },
+    signOut: async () => { await unregisterPush(); await storage.del(); await load(null); router.replace('/login'); },
   }), [ready, token, profile, load]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

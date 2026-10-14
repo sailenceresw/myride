@@ -40,6 +40,7 @@ module.exports = ({ config }) => ({
     'expo-router',
     'expo-secure-store',
     'expo-web-browser',
+    ['expo-notifications', { color: DRIVER ? '#075a52' : '#0b7a6f' }],
     [
       'expo-location',
       {
@@ -64,5 +65,7 @@ module.exports = ({ config }) => ({
   extra: {
     variant: VARIANT,
     apiUrl: process.env.EXPO_PUBLIC_API_URL || null, // e.g. https://api.myride.com.np in production
+    // Push notifications need the EAS project id (`npx eas-cli@latest init` prints it); without it push is skipped.
+    eas: { projectId: (DRIVER ? process.env.EAS_PROJECT_ID_DRIVER : process.env.EAS_PROJECT_ID_RIDER) || undefined },
   },
 });

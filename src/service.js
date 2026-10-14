@@ -379,9 +379,9 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   function emitTrip(trip) {
-    bus.emit(trip.riderId, { type: 'trip', trip: riderView(trip) });
+    bus.emit(trip.riderId, { type: 'trip', role: 'rider', trip: riderView(trip) });
     const d = trip.driverId && store.get('drivers', trip.driverId);
-    if (d) bus.emit(d.userId, { type: 'trip', trip: driverView(trip, d) });
+    if (d) bus.emit(d.userId, { type: 'trip', role: 'driver', trip: driverView(trip, d) });
     bus.emit(`share:${trip.shareToken}`, { type: 'trip', trip: publicView(trip) });
   }
 
