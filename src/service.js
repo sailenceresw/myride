@@ -34,31 +34,40 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog', 'smsLog']) if (!store.db[c]) store.db[c] = {};
   const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
 
-  // Fire-and-forget notification SMS; outcome logged for ops.
+  // Fire-and-forget notification SMS; outcome logged for ops (last 500 kept).
   function notify(phone, text, kind) {
     Promise.resolve(sms(phone, text)).then((r) => {
       const id = store.id('sms');
       store.db.smsLog[id] = { id, at: now(), phone, kind, ok: !!r?.ok, provider: r?.provider, error: r?.error };
+      const ids = Object.keys(store.db.smsLog);
+      for (const old of ids.slice(0, Math.max(0, ids.length - 500))) delete store.db.smsLog[old];
       store.save();
     }).catch(() => {});
   }
 
   // ---------- auth: one identity, separate portals (like Uber's rider app vs Driver app) ----------
   // OTP by SMS: rate-limited per number and per IP; only an HMAC of the code is stored.
+  // Limits are reserved *before* the SMS is sent so concurrent requests can't slip past them.
   async function requestOtp(phone, { ip = 'unknown' } = {}) {
     if (!PHONE_RE.test(String(phone || ''))) fail(400, 'Enter a valid Nepali mobile number (98XXXXXXXX)');
     const t = now();
     const prev = store.db.otps[phone];
     if (prev && t - prev.sentAt < OTP.resendMs) fail(429, `Please wait ${Math.ceil((OTP.resendMs - (t - prev.sentAt)) / 1000)} s before requesting another code`);
-    const recent = (key) => (store.db.otpLog[key] || []).filter((x) => t - x < 3600000);
-    if (recent(`p:${phone}`).length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
-    if (recent(`ip:${ip}`).length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
+    const log = (key) => (store.db.otpLog[key] = (store.db.otpLog[key] || []).filter((x) => t - x < 3600000));
+    if (log(`p:${phone}`).length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
+    if (log(`ip:${ip}`).length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
     const code = String(crypto.randomInt(100000, 1000000));
+    const rec = { hash: otpHash(phone, code), expires: t + OTP.ttlMs, tries: 0, sentAt: t };
+    store.db.otps[phone] = rec;
+    log(`p:${phone}`).push(t);
+    log(`ip:${ip}`).push(t);
     const r = await sms(phone, templates.otp(code));
-    if (!r?.ok) fail(502, 'Could not send the SMS right now — please try again', { smsError: r?.error });
-    store.db.otps[phone] = { hash: otpHash(phone, code), expires: t + OTP.ttlMs, tries: 0, sentAt: t, provider: r.provider };
-    store.db.otpLog[`p:${phone}`] = [...recent(`p:${phone}`), t];
-    store.db.otpLog[`ip:${ip}`] = [...recent(`ip:${ip}`), t];
+    if (!r?.ok) {
+      if (store.db.otps[phone] === rec) delete store.db.otps[phone]; // release the reservation; quota stays spent
+      console.error(`[otp] SMS to ${phone} failed: ${r?.error}`);
+      fail(503, 'Could not send the SMS right now — please try again in a minute', { expose: true });
+    }
+    rec.provider = r.provider;
     store.save();
     return { code, provider: r.provider };
   }
@@ -66,7 +75,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   function verifyOtp(phone, code, { name, portal = 'rider', referralCode } = {}) {
     if (!PORTALS.includes(portal)) fail(400, 'Unknown portal');
     const rec = store.db.otps[phone];
-    if (!rec || rec.expires < now()) fail(400, 'OTP expired, request a new one');
+    if (!rec?.hash || rec.expires < now()) fail(400, 'OTP expired, request a new one'); // also old plain-code records
     if (++rec.tries > OTP.maxTries) { delete store.db.otps[phone]; fail(429, 'Too many wrong attempts — request a new code'); }
     const a = Buffer.from(rec.hash, 'hex'), b = Buffer.from(otpHash(phone, String(code || '')), 'hex');
     if (!crypto.timingSafeEqual(a, b)) { store.save(); fail(400, `Wrong code — ${OTP.maxTries - rec.tries} attempts left`); }

@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
-import { api, setApiToken } from './api';
+import { api, ApiError, setApiToken } from './api';
 import { VARIANT } from './config';
 
 // Each store app signs in to its own portal: MyRide → "rider", MyRide Drive → "driver" (separate sessions, like Uber).
@@ -45,9 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!t) { setProfile(null); return; }
     try {
       const me = await api<{ portal: string; user: Profile }>('GET', '/api/me');
-      if (me.portal !== PORTAL) throw new Error('wrong portal');
+      if (me.portal !== PORTAL) throw new ApiError(403, 'wrong portal', {});
       setProfile(me.user);
-    } catch {
+    } catch (e) {
+      // Only a rejected session signs the user out — offline / server restarts keep the token.
+      if (!(e instanceof ApiError) || ![401, 403].includes(e.status)) return;
       await storage.del(KEY);
       setApiToken(null);
       setToken(null);

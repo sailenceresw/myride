@@ -1,8 +1,9 @@
 const path = require('path');
 const express = require('express');
 const { createService, HttpError } = require('./service');
-const { SERVICES, SAFETY, CITY, GANDAKI, VEHICLES, LOGISTICS, MEMBERSHIP, KYC, PAYROLL } = require('./config');
-const { places, cities, navigationRoute, isValidPoint } = require('./geo');
+const { SERVICES, SAFETY, CITY, GANDAKI, FEDERAL_DRAFT, COMPLIANCE, VEHICLES, LOGISTICS, MEMBERSHIP, KYC, PAYROLL } = require('./config');
+const { quote, gandakiCap, federalCap } = require('./pricing');
+const { places, cities, navigationRoute, isValidPoint, haversineKm } = require('./geo');
 const { createFiles } = require('./files');
 const { monthly, projection, compareVersions, fleetUnitEconomics, SCENARIOS, FIXED_COSTS } = require('./economics');
 const { batchCsv } = require('./payroll');
@@ -28,7 +29,8 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
 
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', process.env.TRUST_PROXY === '1'); // behind a load balancer, use X-Forwarded-For for OTP IP limits
+  // Behind N load balancers set TRUST_PROXY=N: only the last N X-Forwarded-For hops are trusted (client can't spoof req.ip).
+  app.set('trust proxy', +process.env.TRUST_PROXY || false);
   app.use('/api/driver/application/documents', express.json({ limit: '2.2mb' }));
   app.use('/api/driver/face-check', express.json({ limit: '2.2mb' }));
   app.use('/api/trips', express.json({ limit: '2.2mb' })); // proof-of-delivery photo on complete
@@ -82,8 +84,6 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
 
   // Public fare chart: MyRide tariff vs Gandaki legal maximum vs national draft cap vs market, per vehicle.
   app.get('/api/fares', (req, res) => {
-    const { quote, gandakiCap, federalCap } = require('./pricing');
-    const { FEDERAL_DRAFT, COMPLIANCE } = require('./config');
     const rows = ['bike', 'bike_ev', 'car', 'car_ev'].map((id) => {
       const s = SERVICES[id];
       return {
@@ -113,7 +113,6 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/nearby', (req, res) => {
     const lat = +req.query.lat, lng = +req.query.lng;
     if (!isValidPoint({ lat, lng })) return res.status(400).json({ error: 'lat,lng required' });
-    const { haversineKm } = require('./geo');
     const out = store.all('drivers')
       .filter((d) => d.online && d.status === 'idle' && d.loc && !d.suspended && haversineKm(d.loc, { lat, lng }) <= 3)
       .slice(0, 25)
@@ -298,7 +297,8 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.use((err, req, res, next) => {
     const status = err.status || (err.type === 'entity.parse.failed' ? 400 : err.type === 'entity.too.large' ? 413 : 500);
     if (status >= 500) console.error(err);
-    res.status(status).json({ error: status >= 500 ? 'Something went wrong' : err.message, ...(err.extra || {}) });
+    const { expose, ...extra } = err.extra || {};
+    res.status(status).json({ error: status >= 500 && !expose ? 'Something went wrong' : err.message, ...extra });
   });
 
   return { app, svc, bus };

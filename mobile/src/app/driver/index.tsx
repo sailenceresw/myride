@@ -17,7 +17,7 @@ type Driver = {
   id: string; name: string; online: boolean; status: string; driverType: 'partner' | 'employee'; rating: number;
   vehicle: { type: string; plate: string; model: string; fuel: string }; wallet: number; cashHeld?: number;
   earnings: { today: number; trips: number }; hoursLeftToday: number; suspended?: { reason: string } | null;
-  faceCheck?: { pending?: boolean }; homeFilter?: { ward: string | null } | null; homeAddress?: string;
+  faceCheck?: { pending?: boolean; requestedAt?: number }; homeFilter?: { ward: string | null } | null; homeAddress?: string;
 };
 type Dashboard = { driver: Driver | null; application: { status: string } | null; thisWeek?: { net: number; weekNet?: number } };
 const ON_TRIP = ['accepted', 'arrived', 'in_progress'];
@@ -37,14 +37,17 @@ export default function DriverHome() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const d = dash?.driver ?? null;
-  const { fix } = useLocation(d?.online ? 'navigation' : 'normal');
+  const navigating = !!trip && trip.status !== 'arrived'; // the Navigator runs its own GPS watcher
+  const { fix } = useLocation(d?.online ? 'navigation' : 'normal', undefined, !navigating);
+  const promptedCheck = useRef<number | undefined>(undefined);
   const lastSent = useRef(0);
 
   const load = useCallback(async () => {
     try {
       const r = await api<Dashboard>('GET', '/api/driver/dashboard');
       setDash(r);
-      if (r.driver?.faceCheck?.pending) router.push('/driver/selfie');
+      const fc = r.driver?.faceCheck;
+      if (fc?.pending && promptedCheck.current !== fc.requestedAt) { promptedCheck.current = fc.requestedAt; router.push('/driver/selfie'); } // once per check
     } catch { /* offline */ }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
