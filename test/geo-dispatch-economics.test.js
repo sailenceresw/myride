@@ -122,3 +122,19 @@ test('heading home: a Lekhnath driver in Lakeside only gets trips that move towa
   assert.equal(toLekhnath.length, 1);
   assert.equal(toSarangkot.length, 0);
 });
+
+test('simulator restarts demo drivers on a fresh shift even after 12+ hours online (no startup crash)', () => {
+  const { Store } = require('../src/store');
+  const { createService } = require('../src/service');
+  const { startSimulator } = require('../src/simulator');
+  const store = new Store(null);
+  const svc = createService({ store });
+  const first = startSimulator({ store, svc, routeFn: async () => null });
+  first.stop();
+  const today = new Date().toISOString().slice(0, 10);
+  for (const d of store.all('drivers')) Object.assign(d, { shiftDate: today, onlineMinutesToday: 13 * 60 });
+  const again = startSimulator({ store, svc, routeFn: async () => null });
+  again.stop();
+  assert.equal(again.count, first.count);
+  assert.ok(store.all('drivers').every((d) => d.online));
+});
