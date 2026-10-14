@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { router } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import { api, ApiError, setApiToken } from './api';
@@ -6,26 +7,26 @@ import { VARIANT } from './config';
 
 // Each store app signs in to its own portal: MyRide → "rider", MyRide Drive → "driver" (separate sessions, like Uber).
 const PORTAL = VARIANT === 'driver' ? 'driver' : 'rider';
-const KEY = `myride.token.${PORTAL}`;
+/** Same key the web portals use, so the in-app WebView (KYC wizard) shares the session. */
+export const TOKEN_KEY = `myride.token.${PORTAL}`;
 
+const web = Platform.OS === 'web';
 const storage = {
-  get: async (k: string) => (Platform.OS === 'web' ? globalThis.localStorage?.getItem(k) ?? null : SecureStore.getItemAsync(k)),
-  set: async (k: string, v: string) => (Platform.OS === 'web' ? globalThis.localStorage?.setItem(k, v) : SecureStore.setItemAsync(k, v)),
-  del: async (k: string) => (Platform.OS === 'web' ? globalThis.localStorage?.removeItem(k) : SecureStore.deleteItemAsync(k)),
+  get: async () => (web ? globalThis.localStorage?.getItem(TOKEN_KEY) ?? null : SecureStore.getItemAsync(TOKEN_KEY)),
+  set: async (v: string) => (web ? globalThis.localStorage?.setItem(TOKEN_KEY, v) : SecureStore.setItemAsync(TOKEN_KEY, v)),
+  del: async () => (web ? globalThis.localStorage?.removeItem(TOKEN_KEY) : SecureStore.deleteItemAsync(TOKEN_KEY)),
 };
 
 export type Profile = {
   id: string; name: string; phone: string; credits: number; firstRideFree: boolean;
   referral: { code: string; earned: number };
   membership: { active: boolean; label: string; expiresAt: number | null };
-  driverApplication: { status: string } | null; isDriver: boolean;
 };
 
 type AuthState = {
   ready: boolean;
   token: string | null;
   profile: Profile | null;
-  portal: string;
   requestOtp: (phone: string) => Promise<{ devOtp?: string }>;
   verifyOtp: (phone: string, otp: string, name: string, referralCode?: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -42,33 +43,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async (t: string | null) => {
     setApiToken(t);
     setToken(t);
-    if (!t) { setProfile(null); return; }
+    setProfile(null);
+    if (!t) return;
     try {
       const me = await api<{ portal: string; user: Profile }>('GET', '/api/me');
-      if (me.portal !== PORTAL) throw new ApiError(403, 'wrong portal', {});
+      if (me.portal !== PORTAL) throw new ApiError(403, 'wrong portal');
       setProfile(me.user);
     } catch (e) {
       // Only a rejected session signs the user out — offline / server restarts keep the token.
-      if (!(e instanceof ApiError) || ![401, 403].includes(e.status)) return;
-      await storage.del(KEY);
-      setApiToken(null);
-      setToken(null);
-      setProfile(null);
+      if (e instanceof ApiError && [401, 403].includes(e.status)) { await storage.del(); setApiToken(null); setToken(null); }
     }
   }, []);
 
-  useEffect(() => { storage.get(KEY).then((t) => load(t)).finally(() => setReady(true)); }, [load]);
+  useEffect(() => { storage.get().then(load).finally(() => setReady(true)); }, [load]);
 
   const value = useMemo<AuthState>(() => ({
-    ready, token, profile, portal: PORTAL,
+    ready, token, profile,
     requestOtp: (phone) => api('POST', '/api/auth/otp', { phone }),
     verifyOtp: async (phone, otp, name, referralCode) => {
       const r = await api<{ token: string }>('POST', '/api/auth/verify', { phone, otp, name, portal: PORTAL, referralCode: referralCode || undefined });
-      await storage.set(KEY, r.token);
+      await storage.set(r.token);
       await load(r.token);
     },
     refresh: () => load(token),
-    signOut: async () => { await storage.del(KEY); await load(null); },
+    signOut: async () => { await storage.del(); await load(null); router.replace('/login'); },
   }), [ready, token, profile, load]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

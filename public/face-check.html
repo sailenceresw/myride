@@ -23,19 +23,19 @@
 // Used inside the native MyRide Drive app (WebView). Token arrives in the URL fragment so it never hits server logs.
 (() => {
   const token = new URLSearchParams(location.hash.slice(1)).get('token');
-  const post = (msg) => window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
-  const go = document.getElementById('go');
+  const post = (m) => window.ReactNativeWebView?.postMessage(JSON.stringify(m));
+  const [go, cam, msg, err] = ['go', 'cam', 'msg', 'err'].map((id) => document.getElementById(id));
   go.onclick = async () => {
     go.disabled = true;
-    document.getElementById('err').textContent = '';
+    err.textContent = '';
     try {
-      const r = await MRFace.captureLive(document.getElementById('cam'), { onStatus: (m) => { document.getElementById('msg').textContent = m; } });
+      const r = await MRFace.captureLive(cam, { onStatus: (m) => { msg.textContent = m; } });
       const res = await MR.api('POST', '/api/driver/face-check', { descriptor: r.descriptor, photo: r.photo }, token);
-      if (res.passed) { document.getElementById('msg').textContent = '✅ Verified — thank you!'; post({ type: 'face_check', passed: true }); return; }
-      if (res.suspended) { document.getElementById('err').textContent = 'We could not verify you. Your account is paused for review — call MyRide support.'; post({ type: 'face_check', passed: false, suspended: true }); return; }
-      document.getElementById('err').textContent = 'Face did not match. Try again in better light.';
+      if (res.passed) { msg.textContent = '✅ Verified — thank you!'; post({ type: 'face_check', passed: true }); return; }
+      if (res.suspended) { err.textContent = 'We could not verify you. Your account is paused for review — call MyRide support.'; post({ type: 'face_check', passed: false, suspended: true }); return; }
+      err.textContent = 'Face did not match. Try again in better light.';
       post({ type: 'face_check', passed: false });
-    } catch (e) { document.getElementById('err').textContent = e.message; }
+    } catch (e) { err.textContent = e.message; }
     go.disabled = false;
   };
 })();

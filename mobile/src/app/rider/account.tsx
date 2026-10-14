@@ -1,8 +1,7 @@
-import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, Text } from 'react-native';
+import { Alert, ScrollView, Share, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Card, Pill, Row, Txt } from '@/components/ui';
+import { BackHeader, Button, Card, Pill, Row, Txt } from '@/components/ui';
 import { api, apiUrlFor, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/theme';
@@ -21,7 +20,6 @@ export default function Account() {
 
   if (!profile) return null;
   const m = profile.membership;
-  const npr = (n: number) => `Rs ${n.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 
   async function subscribe(plan: 'plus_monthly' | 'plus_yearly') {
     setBusy(plan);
@@ -43,7 +41,7 @@ export default function Account() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 6 }}>
-        <Row><Pressable onPress={() => router.back()} accessibilityLabel="Back"><Text style={{ fontSize: 24, color: t.ink }}>←</Text></Pressable><Txt kind="h1">{profile.name}</Txt></Row>
+        <BackHeader title={profile.name} kind="h1" />
         <Txt kind="muted">+977 {profile.phone}</Txt>
 
         <Card style={{ borderColor: m.active ? t.accent : t.line, borderWidth: 2 }}>
@@ -53,8 +51,8 @@ export default function Account() {
             <Txt kind="small" style={{ marginTop: 6 }}>{m.label} · until {m.expiresAt ? new Date(m.expiresAt).toLocaleDateString() : ''}</Txt>
           ) : plans && (
             <>
-              <Button title={`${npr(plans.plus_monthly.price)} / month`} onPress={() => subscribe('plus_monthly')} loading={busy === 'plus_monthly'} style={{ marginTop: 10 }} />
-              <Button title={`${npr(plans.plus_yearly.price)} / year — save 17%`} kind="accent" onPress={() => subscribe('plus_yearly')} loading={busy === 'plus_yearly'} style={{ marginTop: 8 }} />
+              <Button title={`${rs(plans.plus_monthly.price, 2)} / month`} onPress={() => subscribe('plus_monthly')} loading={busy === 'plus_monthly'} style={{ marginTop: 10 }} />
+              <Button title={`${rs(plans.plus_yearly.price, 2)} / year — save 17%`} kind="accent" onPress={() => subscribe('plus_yearly')} loading={busy === 'plus_yearly'} style={{ marginTop: 8 }} />
               <Button title="Try free for 7 days" kind="ghost" onPress={trial} loading={busy === 'trial'} style={{ marginTop: 8 }} />
             </>
           )}
@@ -72,7 +70,7 @@ export default function Account() {
 
         <Card><Txt kind="h2">Drive with MyRide</Txt><Txt kind="muted">Get the MyRide Drive app — same mobile number, separate driver account. Weekly payouts to your bank.</Txt></Card>
 
-        <Button title="Sign out" kind="ghost" onPress={async () => { await signOut(); router.replace('/login'); }} style={{ marginTop: 8 }} />
+        <Button title="Sign out" kind="ghost" onPress={signOut} style={{ marginTop: 8 }} />
       </ScrollView>
     </SafeAreaView>
   );

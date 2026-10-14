@@ -4,10 +4,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Txt } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { IS_DRIVER } from '@/lib/config';
+import { IS_DRIVER, PHONE_RE } from '@/lib/config';
 import { useTheme } from '@/lib/theme';
-
-const PHONE_RE = /^9[678]\d{8}$/;
 
 export default function Login() {
   const t = useTheme();

@@ -18,7 +18,7 @@ let base, server, svc, store;
 let clock = Date.parse('2026-10-14T04:00:00Z');
 let randValue = 0.99; // > 0.3 → no random selfie unless a test lowers it
 const smsSent = [];
-const smsStub = async (phone, text) => { smsSent.push({ phone, text }); return { ok: true, provider: 'test' }; };
+const smsStub = async (phone, text) => { smsSent.push({ phone, text }); return { ok: true, provider: 'console' }; }; // dev: code echoed back
 const api = async (method, path, body, token) => {
   const res = await fetch(base + path, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();

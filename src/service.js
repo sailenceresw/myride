@@ -3,21 +3,21 @@ const crypto = require('crypto');
 const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC } = require('./config');
 const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, nearestPlace, places } = require('./geo');
 const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
-const { findCandidates, canServe, hoursLeftToday } = require('./dispatch');
+const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
 const rewards = require('./rewards');
 const kyc = require('./kyc');
 const payroll = require('./payroll');
-const { sendSms, templates } = require('./sms');
+const { sendSms, templates, PHONE_RE } = require('./sms');
 
-const PHONE_RE = /^9[678]\d{8}$/; // Nepal mobile: 98x/97x (NTC, Ncell), 96x (Smart)
 const ACTIVE = ['searching', 'accepted', 'arrived', 'in_progress'];
 const MAX_OFFER_ROUNDS = 3;
 const PORTALS = ['rider', 'driver', 'admin'];
 
+// `expose`: show the message to clients even for 5xx (default: only 4xx messages are shown).
 class HttpError extends Error {
-  constructor(status, message, extra) { super(message); this.status = status; if (extra) this.extra = extra; }
+  constructor(status, message, extra, expose = status < 500) { super(message); Object.assign(this, { status, expose }); if (extra) this.extra = extra; }
 }
-const fail = (status, msg, extra) => { throw new HttpError(status, msg, extra); };
+const fail = (status, msg, extra, expose) => { throw new HttpError(status, msg, extra, expose); };
 const pin4 = () => String(crypto.randomInt(1000, 10000));
 const r2 = (n) => Math.round(n * 100) / 100;
 const kindOf = (svc) => (svc.kind === 'ride' ? 'ride' : svc.logistics ? 'logistics' : 'delivery');
@@ -31,18 +31,25 @@ const OTP = {
 };
 
 function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
-  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog', 'smsLog']) if (!store.db[c]) store.db[c] = {};
+  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog']) if (!store.db[c]) store.db[c] = {};
+  if (!Array.isArray(store.db.smsLog)) store.db.smsLog = [];
   const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
 
-  // Fire-and-forget notification SMS; outcome logged for ops (last 500 kept).
+  // Fire-and-forget notification SMS; outcome logged for ops (newest 500 kept).
   function notify(phone, text, kind) {
     Promise.resolve(sms(phone, text)).then((r) => {
-      const id = store.id('sms');
-      store.db.smsLog[id] = { id, at: now(), phone, kind, ok: !!r?.ok, provider: r?.provider, error: r?.error };
-      const ids = Object.keys(store.db.smsLog);
-      for (const old of ids.slice(0, Math.max(0, ids.length - 500))) delete store.db.smsLog[old];
+      store.db.smsLog.push({ at: now(), phone, kind, ok: !!r?.ok, provider: r?.provider, error: r?.error });
+      if (store.db.smsLog.length > 500) store.db.smsLog.shift();
       store.save();
     }).catch(() => {});
+  }
+  const smsLog = (n = 100) => store.db.smsLog.slice(-n).reverse();
+
+  // Sliding one-hour window per key; empty windows are deleted so the log can't grow without bound.
+  function windowOf(key, t) {
+    const w = (store.db.otpLog[key] || []).filter((x) => t - x < 3600000);
+    if (w.length) store.db.otpLog[key] = w; else delete store.db.otpLog[key];
+    return w;
   }
 
   // ---------- auth: one identity, separate portals (like Uber's rider app vs Driver app) ----------
@@ -53,19 +60,19 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const t = now();
     const prev = store.db.otps[phone];
     if (prev && t - prev.sentAt < OTP.resendMs) fail(429, `Please wait ${Math.ceil((OTP.resendMs - (t - prev.sentAt)) / 1000)} s before requesting another code`);
-    const log = (key) => (store.db.otpLog[key] = (store.db.otpLog[key] || []).filter((x) => t - x < 3600000));
-    if (log(`p:${phone}`).length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
-    if (log(`ip:${ip}`).length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
+    const byPhone = windowOf(`p:${phone}`, t), byIp = windowOf(`ip:${ip}`, t);
+    if (byPhone.length >= OTP.perPhonePerHour) fail(429, 'Too many codes requested for this number. Try again in an hour');
+    if (byIp.length >= OTP.perIpPerHour) fail(429, 'Too many requests from this network. Try again later');
     const code = String(crypto.randomInt(100000, 1000000));
     const rec = { hash: otpHash(phone, code), expires: t + OTP.ttlMs, tries: 0, sentAt: t };
     store.db.otps[phone] = rec;
-    log(`p:${phone}`).push(t);
-    log(`ip:${ip}`).push(t);
+    store.db.otpLog[`p:${phone}`] = [...byPhone, t];
+    store.db.otpLog[`ip:${ip}`] = [...byIp, t];
     const r = await sms(phone, templates.otp(code));
     if (!r?.ok) {
       if (store.db.otps[phone] === rec) delete store.db.otps[phone]; // release the reservation; quota stays spent
       console.error(`[otp] SMS to ${phone} failed: ${r?.error}`);
-      fail(503, 'Could not send the SMS right now — please try again in a minute', { expose: true });
+      fail(503, 'Could not send the SMS right now — please try again in a minute', null, true);
     }
     rec.provider = r.provider;
     store.save();
@@ -776,6 +783,15 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   // ---------- admin ----------
+  // Uber-style "cars around you": available drivers within 3 km, position rounded to ~100 m, no identities.
+  function nearbyDrivers(p) {
+    const t = now(), round = (x) => Math.round(x * 1000) / 1000;
+    return store.all('drivers')
+      .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
+      .slice(0, 25)
+      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev' }));
+  }
+
   function stats() {
     const trips = store.all('trips');
     const done = trips.filter((t) => t.status === 'completed');
@@ -825,7 +841,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   return {
-    requestOtp, verifyOtp, session, userFromToken, profile, updateProfile, applyReferral,
+    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, applyReferral,
     createMembershipOrder, startTrial, markOrderPaid, cancelMembership,
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,

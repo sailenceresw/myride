@@ -111,7 +111,7 @@ test('OTP limits: 60 s resend cooldown, 5 per hour per number, 5 wrong tries, pe
 
 test('if the SMS gateway fails, the user gets a retryable error and no OTP is stored', async () => {
   const { svc, store } = svcWith({ smsOk: false });
-  await assert.rejects(svc.requestOtp('9846000003', { ip: 'x' }), (e) => e.status === 503 && e.extra.expose && /try again/.test(e.message));
+  await assert.rejects(svc.requestOtp('9846000003', { ip: 'x' }), (e) => e.status === 503 && e.expose && /try again/.test(e.message));
   assert.equal(store.db.otps['9846000003'], undefined);
 });
 

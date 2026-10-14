@@ -2,7 +2,7 @@
 // with automatic failover. Dev/test default is the console provider (prints instead of sending).
 //
 // Env:
-//   SMS_PROVIDER = sparrow | aakash | console      (primary; default console)
+//   SMS_PROVIDER = sparrow | aakash | console      (primary; default console outside production)
 //   SMS_FALLBACK = sparrow | aakash                (optional second provider)
 //   SPARROW_TOKEN, SPARROW_FROM                     (token + NTA-approved sender ID from the Sparrow dashboard)
 //   AAKASH_TOKEN                                    (auth_token from aakashsms.com)
@@ -11,8 +11,16 @@
 const SPARROW_URL = process.env.SPARROW_URL || 'https://api.sparrowsms.com/v2/sms/';
 const AAKASH_URL = process.env.AAKASH_URL || 'https://sms.aakashsms.com/sms/v3/send';
 
+/** Nepal mobile: 98x/97x (NTC, Ncell), 96x (Smart). The single source of this rule on the server. */
+const PHONE_RE = /^9[678]\d{8}$/;
+
 // "+977 98…", "977-98…", "98…" → "98…" (only a 13-digit number carries the 977 country code).
 const toLocal = (phone) => { const d = String(phone).replace(/\D/g, ''); return d.length === 13 && d.startsWith('977') ? d.slice(3) : d; };
+
+async function postForm(fetchImpl, url, params) {
+  const res = await fetchImpl(url, { method: 'POST', body: new URLSearchParams(params), signal: AbortSignal.timeout(8000) });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+}
 
 const PROVIDERS = {
   console: {
@@ -22,30 +30,23 @@ const PROVIDERS = {
       return { ok: true, id: `console-${Date.now()}` };
     },
   },
-
-  // Sparrow: POST form {token, from, to, text}; success = HTTP 200 + response_code 200.
+  // Sparrow: success = HTTP 200 + response_code 200.
   sparrow: {
     configured: () => !!(process.env.SPARROW_TOKEN && process.env.SPARROW_FROM),
     async send(to, text, { fetchImpl = fetch } = {}) {
-      const body = new URLSearchParams({ token: process.env.SPARROW_TOKEN, from: process.env.SPARROW_FROM, to, text });
-      const res = await fetchImpl(SPARROW_URL, { method: 'POST', body, signal: AbortSignal.timeout(8000) });
-      const json = await res.json().catch(() => ({}));
-      if (res.status === 200 && +json.response_code === 200) return { ok: true, id: json.message_id, credit: json.credit_consumed };
-      return { ok: false, error: json.response || `HTTP ${res.status}` };
+      const { status, json } = await postForm(fetchImpl, SPARROW_URL, { token: process.env.SPARROW_TOKEN, from: process.env.SPARROW_FROM, to, text });
+      if (status === 200 && +json.response_code === 200) return { ok: true, id: json.message_id, credit: json.credit_consumed };
+      return { ok: false, error: json.response || `HTTP ${status}` };
     },
   },
-
-  // Aakash: POST form {auth_token, to, text}; success = error:false and the number in data.valid.
+  // Aakash: success = error:false and the number in data.valid.
   aakash: {
     configured: () => !!process.env.AAKASH_TOKEN,
     async send(to, text, { fetchImpl = fetch } = {}) {
-      const body = new URLSearchParams({ auth_token: process.env.AAKASH_TOKEN, to, text });
-      const res = await fetchImpl(AAKASH_URL, { method: 'POST', body, signal: AbortSignal.timeout(8000) });
-      const json = await res.json().catch(() => ({}));
-      const valid = json?.data?.valid?.[0];
+      const { status, json } = await postForm(fetchImpl, AAKASH_URL, { auth_token: process.env.AAKASH_TOKEN, to, text });
+      const valid = json?.data?.valid?.[0], invalid = json?.data?.invalid?.[0];
       if (json.error === false && valid) return { ok: true, id: valid.id, network: valid.network };
-      const invalid = json?.data?.invalid?.[0];
-      return { ok: false, error: json.message || (invalid ? `invalid number (${invalid.status})` : `HTTP ${res.status}`) };
+      return { ok: false, error: json.message || (invalid ? `invalid number (${invalid.status})` : `HTTP ${status}`) };
     },
   },
 };
@@ -53,8 +54,7 @@ const PROVIDERS = {
 function chain() {
   // Production never silently falls back to printing codes to the log: configure a real gateway.
   const primary = process.env.SMS_PROVIDER || (process.env.NODE_ENV === 'production' ? '' : 'console');
-  const list = [primary, process.env.SMS_FALLBACK].filter((p, i, a) => p && PROVIDERS[p] && a.indexOf(p) === i);
-  return list.filter((p) => PROVIDERS[p].configured());
+  return [primary, process.env.SMS_FALLBACK].filter((p, i, a) => p && PROVIDERS[p]?.configured() && a.indexOf(p) === i);
 }
 
 /**
@@ -63,23 +63,21 @@ function chain() {
  */
 async function sendSms(phone, text, opts = {}) {
   const to = toLocal(phone);
-  if (!/^9[678]\d{8}$/.test(to)) return { ok: false, error: 'invalid Nepali mobile number', attempts: [] };
-  const attempts = [];
+  if (!PHONE_RE.test(to)) return { ok: false, error: 'invalid Nepali mobile number', attempts: [] };
   const providers = chain();
-  if (!providers.length) return { ok: false, error: 'No SMS provider configured (set SPARROW_TOKEN+SPARROW_FROM or AAKASH_TOKEN)', attempts };
-  for (const name of providers) {
+  if (!providers.length) return { ok: false, error: 'No SMS provider configured (set SPARROW_TOKEN+SPARROW_FROM or AAKASH_TOKEN)', attempts: [] };
+  const attempts = [];
+  for (const provider of providers) {
     try {
-      const r = await PROVIDERS[name].send(to, text, opts);
-      attempts.push({ provider: name, ...r });
-      if (r.ok) return { ok: true, provider: name, id: r.id, attempts };
+      const r = await PROVIDERS[provider].send(to, text, opts);
+      attempts.push({ provider, ...r });
+      if (r.ok) return { ok: true, provider, id: r.id, attempts };
     } catch (e) {
-      attempts.push({ provider: name, ok: false, error: e.message });
+      attempts.push({ provider, ok: false, error: e.message });
     }
   }
   return { ok: false, error: attempts.at(-1)?.error || 'SMS failed', attempts };
 }
-
-const isConsole = () => process.env.NODE_ENV !== 'production' && (process.env.SMS_PROVIDER || 'console') === 'console';
 
 // Message templates (≤ 160 GSM chars). OTP format works with Android SMS Retriever and iOS one-time-code auto-fill.
 const templates = {
@@ -89,4 +87,4 @@ const templates = {
   kycAction: (status, reason) => `MyRide Drive: your application needs attention (${status}). ${String(reason || '').slice(0, 90)}`,
 };
 
-module.exports = { sendSms, templates, isConsole, toLocal, PROVIDERS };
+module.exports = { sendSms, templates, toLocal, PHONE_RE, PROVIDERS };
