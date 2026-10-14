@@ -81,3 +81,33 @@ test('simulated GPS walks the route (emulator demo mode)', () => {
   const mid = simulatedPosition(route, cum, 30, 10);
   assert.ok(Math.abs(mid.heading - 90) < 2);
 });
+
+test('field-style drive: noisy GPS (±12 m) never false-reroutes, never jumps back, speaks each prompt once, arrives', () => {
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5; // deterministic jitter
+  const jitter = 12 / 111_000; // ≈ 12 m in degrees
+  const spoken = new Set<string>();
+  const said: string[] = [];
+  let hint = 0, offStreak = 0, maxOffStreak = 0, arrived = false;
+  for (let t = 0; t <= 140 && !arrived; t++) {
+    const p = simulatedPosition(route, cum, t, 7); // ~25 km/h through Lakeside traffic
+    const s = progress(route, { lat: p.lat + rand() * 2 * jitter, lng: p.lng + rand() * 2 * jitter }, { cum, offsets, hintIndex: hint });
+    assert.ok(s.segIndex >= hint, `jumped back at t=${t}`);
+    hint = s.segIndex;
+    offStreak = s.offRoute ? offStreak + 1 : 0;
+    maxOffStreak = Math.max(maxOffStreak, offStreak);
+    const a = announcement(s, spoken);
+    if (a) said.push(a);
+    arrived = s.arrived;
+  }
+  assert.ok(arrived, 'reached the destination');
+  assert.ok(maxOffStreak < 3, 'the Navigator reroutes after 3 off-route fixes — jitter must never trigger it');
+  assert.equal(new Set(said).size, said.length, 'no repeated prompts');
+  assert.ok(said.some((x) => x === 'Turn left onto Baidam Road'), said.join(' | '));
+});
+
+test('a GPS dropout that jumps ahead resumes on the right segment', () => {
+  const s = progress(route, { lat: 28.2110, lng: 83.9651 }, { cum, offsets, hintIndex: 0 }); // reappears after the turn
+  assert.equal(s.next?.type, 'arrive');
+  assert.equal(s.offRoute, false);
+});

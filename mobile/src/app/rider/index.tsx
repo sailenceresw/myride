@@ -2,15 +2,15 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
-import type MapView from 'react-native-maps';
-import { Marker, Polyline } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppMap, Button, Card, Pill, RoundButton, Row, Sheet, Txt } from '@/components/ui';
+import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
+import { Button, Card, Pill, RoundButton, Row, Sheet, Txt } from '@/components/ui';
 import { api, apiUrlFor, rs, type Point, type Quote, type Trip } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { call, POLICE } from '@/lib/config';
 import { useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
+import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 
 type Kind = 'ride' | 'delivery' | 'logistics';
@@ -25,13 +25,12 @@ const STATUS: Record<string, string> = {
   searching: 'Finding your driver…', accepted: 'Driver is on the way', arrived: 'Your driver has arrived', in_progress: 'On the way',
   completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No drivers available right now', scheduled: 'Scheduled',
 };
-const toLatLng = ({ lat, lng }: { lat: number; lng: number }) => ({ latitude: lat, longitude: lng });
 
 export default function RiderHome() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { profile, refresh } = useAuth();
-  const map = useRef<MapView>(null);
+  const map = useRef<MapHandle>(null);
   const fix = useLocation('normal');
 
   const [kind, setKind] = useState<Kind>('ride');
@@ -59,7 +58,7 @@ export default function RiderHome() {
   useEffect(() => {
     if (!fix || centred.current) return;
     centred.current = true;
-    map.current?.animateCamera({ center: toLatLng(fix), zoom: 16, altitude: 1200 }, { duration: 700 });
+    map.current?.flyTo(fix, { zoom: 16 });
   }, [fix]);
 
   // Places (landmarks, 33 wards, intercity lanes) and any trip still in progress.
@@ -70,11 +69,14 @@ export default function RiderHome() {
     api<Trip[]>('GET', '/api/trips').then((l) => setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? null)).catch(() => {});
   }, []);
 
-  usePolling(async () => {
-    const next = await api<Trip>('GET', `/api/trips/${trip!.id}`);
-    if (next.status !== trip!.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  // Live trip updates arrive over SSE; the slow poll only covers a dropped connection.
+  const live = !!trip && ACTIVE.includes(trip.status);
+  const update = (next: Trip) => {
+    if (next.status !== trip?.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTrip(next);
-  }, 3000, !!trip && ACTIVE.includes(trip.status));
+  };
+  useEvents((e) => { if (e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
+  usePolling(async () => update(await api<Trip>('GET', `/api/trips/${trip!.id}`)), 15000, live);
 
   usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${pickup!.lat}&lng=${pickup!.lng}`)), 8000, !trip && !!pickup);
 
@@ -85,7 +87,7 @@ export default function RiderHome() {
       setQuote(r);
       setSel(r.recommend ?? r.quotes.find((q) => !q.unavailable)?.service ?? null);
       if (r.promoError) setErr(r.promoError);
-      map.current?.fitToCoordinates(r.route.geometry.map(([lat, lng]) => toLatLng({ lat, lng })), { edgePadding: { top: 120, right: 50, bottom: 420, left: 50 }, animated: true });
+      map.current?.fit(r.route.geometry.map(([lat, lng]) => ({ lat, lng })), { top: 120, right: 50, bottom: 420, left: 50 });
     } catch (e) { setErr((e as Error).message); setQuote(null); }
     setBusy(false);
   }, [weight]);
@@ -130,9 +132,15 @@ export default function RiderHome() {
   const reset = () => { setTrip(null); setDrop(null); setQuote(null); refresh(); };
 
   const geometry = trip?.route.geometry ?? quote?.route.geometry;
-  const routeCoords = useMemo(() => geometry?.map(([lat, lng]) => toLatLng({ lat, lng })), [geometry]);
+  const routeCoords = useMemo(() => geometry?.map(([lat, lng]) => ({ lat, lng })), [geometry]);
   const selected = quote?.quotes.find((q) => q.service === sel);
   const pk = trip?.pickup ?? pickup, dp = trip?.drop ?? drop;
+  const markers: MapMarker[] = [
+    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, emoji: vehicleEmoji(c.type), size: 22 }))),
+    ...(pk ? [{ key: 'pickup', at: pk, color: t.brand, title: 'Pickup' }] : []),
+    ...(dp ? [{ key: 'drop', at: dp, color: t.accent, title: 'Drop' }] : []),
+    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 28 }] : []),
+  ];
   const input = [styles.small, { borderColor: t.line, color: t.ink }];
 
   // ---------- search screen ----------
@@ -161,15 +169,7 @@ export default function RiderHome() {
 
   return (
     <View style={{ flex: 1 }}>
-      <AppMap ref={map} showsUserLocation showsMyLocationButton={false} mapPadding={{ top: 0, bottom: 300, left: 0, right: 0 }}>
-        {!trip && nearby.map((c, i) => (
-          <Marker key={`n${i}`} coordinate={toLatLng(c)} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}><Text style={{ fontSize: 22 }}>{vehicleEmoji(c.type)}</Text></Marker>
-        ))}
-        {routeCoords && <Polyline coordinates={routeCoords} strokeColor={t.ink} strokeWidth={5} />}
-        {pk && <Marker coordinate={toLatLng(pk)} pinColor={t.brand} title="Pickup" />}
-        {dp && <Marker coordinate={toLatLng(dp)} pinColor={t.accent} title="Drop" />}
-        {trip?.driver?.loc && <Marker coordinate={toLatLng(trip.driver.loc)} anchor={{ x: 0.5, y: 0.5 }}><Text style={{ fontSize: 28 }}>{vehicleEmoji(trip.driver.vehicle.type)}</Text></Marker>}
-      </AppMap>
+      <AppMap ref={map} user={fix} padding={{ bottom: 300 }} markers={markers} lines={routeCoords ? [{ coords: routeCoords, color: t.ink, width: 5 }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
         <RoundButton icon="👤" label="Account" onPress={() => router.push('/rider/account')} />

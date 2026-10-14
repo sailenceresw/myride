@@ -141,12 +141,12 @@ test('KYC: employees need no own vehicle documents; bank-name mismatch and face 
 
 test('Real-Time ID check: matching selfie passes; two mismatches suspend the driver', () => {
   const d = { faceDescriptor: desc(3), faceCheck: { pending: true, reason: 'random' } };
-  assert.equal(kyc.verifySelfie(d, near(desc(3), 0.01), NOW).passed, true);
+  assert.equal(kyc.verifySelfie(d, { provider: 'local', passed: true, distance: 0.1 }, NOW).passed, true);
   assert.equal(d.faceCheck.pending, false);
   assert.equal(d.faceCheck.lastPassedAt, NOW);
-  assert.equal(kyc.verifySelfie(d, desc(7), NOW).passed, false);
+  assert.equal(kyc.verifySelfie(d, { provider: 'local', passed: false, distance: 0.9 }, NOW).passed, false);
   assert.ok(!d.suspended);
-  kyc.verifySelfie(d, desc(8), NOW);
+  kyc.verifySelfie(d, { provider: 'local', passed: false, distance: 0.8 }, NOW);
   assert.match(d.suspended.reason, /review/);
   assert.equal(kyc.faceDistance(desc(1), [1, 2]), Infinity);
 });

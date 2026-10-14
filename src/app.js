@@ -8,22 +8,28 @@ const { createFiles } = require('./files');
 const { monthly, projection, compareVersions, fleetUnitEconomics, SCENARIOS, FIXED_COSTS } = require('./economics');
 const { batchCsv } = require('./payroll');
 const payments = require('./payments');
+const { createPush } = require('./push');
 
 // In-process pub/sub for Server-Sent Events. Replace with Redis pub/sub when running >1 instance.
-function createBus() {
+// Messages for a user with no open stream (app closed/backgrounded) go to `offline` → push notification.
+function createBus(offline = () => {}) {
   const subs = new Map();
   return {
     subscribe(ch, res) { if (!subs.has(ch)) subs.set(ch, new Set()); subs.get(ch).add(res); },
     unsubscribe(ch, res) { subs.get(ch)?.delete(res); },
-    emit(ch, msg) { for (const res of subs.get(ch) || []) res.write(`data: ${JSON.stringify(msg)}\n\n`); },
+    emit(ch, msg) {
+      if (!subs.get(ch)?.size) return offline(ch, msg);
+      for (const res of subs.get(ch)) res.write(`data: ${JSON.stringify(msg)}\n\n`);
+    },
   };
 }
 
-function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sms, uploadsDir = null, dev = process.env.NODE_ENV !== 'production' } = {}) {
-  const bus = createBus();
+function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sms, face, pushFetch, uploadsDir = null, dev = process.env.NODE_ENV !== 'production' } = {}) {
+  const push = createPush({ store, fetchImpl: pushFetch });
+  const bus = createBus((ch, msg) => push.deliver(ch, msg));
   const adminPhones = (process.env.ADMIN_PHONES || (dev ? '9800000000' : '')).split(',').filter(Boolean);
   const files = createFiles(store, uploadsDir);
-  const svc = createService({ store, bus, routeFn, now, rand, files, sms, isAdminPhone: (p) => adminPhones.includes(p) });
+  const svc = createService({ store, bus, routeFn, now, rand, files, sms, face, isAdminPhone: (p) => adminPhones.includes(p) });
   svc.seedPromos();
 
   const app = express();
@@ -144,6 +150,12 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => { clearInterval(ping); channels.forEach((ch) => bus.unsubscribe(ch, res)); });
   });
+  // Expo push token of this device, per portal (the rider and Drive apps are separate installs).
+  app.post('/api/push/token', anyAuth, (req, res) => {
+    if (!push.register(req.user, req.body.token, req.portal)) return res.status(400).json({ error: 'Invalid Expo push token' });
+    res.json({ ok: true });
+  });
+  app.delete('/api/push/token', anyAuth, (req, res) => { push.unregister(req.user, req.body.token); res.json({ ok: true }); });
 
   // ---------- rider: profile, membership, referral ----------
   app.get('/api/profile', rider, (req, res) => res.json(svc.profile(req.user)));

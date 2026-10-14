@@ -1,10 +1,9 @@
 // Driver KYC: Nepali identity documents, licence category vs vehicle, bank account, selfie face match,
 // and Uber-style Real-Time ID checks (random selfies before/while online).
 //
-// Face matching: the Drive app computes a 128-d face descriptor in the browser (face-api.js) for the selfie and
-// for the photo on the licence/citizenship card; the server compares descriptors and keeps the photos for human
-// review. PRODUCTION: move matching + liveness to a server-side vendor (e.g. AWS Rekognition Face Liveness or a
-// Nepal e-KYC provider) — client-computed descriptors can be forged by a determined attacker.
+// Face matching at application time: the Drive app computes 128-d descriptors (face-api.js) for the selfie and the
+// licence/citizenship photo; the server compares them and keeps the photos for human review. Random selfie checks go
+// through src/faceVerify.js — set FACE_PROVIDER=rekognition so the server matches the photos itself.
 const { KYC, VEHICLES, GANDAKI } = require('./config');
 
 const httpErr = (status, msg) => Object.assign(new Error(msg), { status });
@@ -122,12 +121,11 @@ function requestSelfie(driver, now, reason) {
   return driver.faceCheck;
 }
 
-// Verify a selfie descriptor against the enrolled one. Mutates driver.faceCheck; returns result.
-function verifySelfie(driver, descriptor, now) {
+// Record a selfie check result from the face verifier (src/faceVerify.js). Mutates driver.faceCheck; returns the attempt.
+function verifySelfie(driver, match, now) {
   const fc = driver.faceCheck || {};
-  const dist = faceDistance(descriptor, driver.faceDescriptor);
-  const passed = dist <= KYC.faceMatchThreshold;
-  const attempt = { at: now, distance: Number.isFinite(dist) ? +dist.toFixed(4) : null, passed, reason: fc.reason || 'manual' };
+  const { passed } = match;
+  const attempt = { at: now, passed, reason: fc.reason || 'manual', provider: match.provider, distance: match.distance, similarity: match.similarity, fp: match.fp, error: match.error };
   driver.faceCheck = {
     ...fc,
     pending: !passed,
