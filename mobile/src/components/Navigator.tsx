@@ -1,9 +1,10 @@
 import * as Speech from 'expo-speech';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { BaseTiles, tileMapType } from './BaseTiles';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Linking, StyleSheet, Text, View } from 'react-native';
+import type MapView from 'react-native-maps';
+import { Marker, Polyline } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppMap, RoundButton } from '@/components/ui';
 import { api, type Point } from '@/lib/api';
 import { announcement, arrow, cumulative, formatDistance, instruction, progress, simulatedPosition, stepOffsets, type NavRoute, type NavState } from '@/lib/nav';
 import { useTheme } from '@/lib/theme';
@@ -18,8 +19,9 @@ type Props = {
   onArrive?: () => void;
   bottom?: ReactNode;
 };
-type Active = { route: NavRoute; cum: number[]; offsets: number[]; startedAt: number; hint: number };
-type View3 = NavState & { segIndex: number; pos: { lat: number; lng: number }; etaClock: string };
+type Session = { route: NavRoute; cum: number[]; offsets: number[]; startedAt: number; hint: number };
+type NavView = NavState & { pos: Fix; etaClock: string };
+const toLatLng = ([latitude, longitude]: [number, number]) => ({ latitude, longitude });
 
 /** Uber-style turn-by-turn navigation: maneuver banner, tilted camera following heading, voice, rerouting. */
 export function Navigator({ destination, destinationLabel, simulate = false, vehicleIcon = '🏍️', onPosition, onArrive, bottom }: Props) {
@@ -27,20 +29,21 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
   const insets = useSafeAreaInsets();
   const map = useRef<MapView>(null);
   const [route, setRoute] = useState<NavRoute | null>(null);
-  const [nav, setNav] = useState<View3 | null>(null);
+  const [nav, setNav] = useState<NavView | null>(null);
   const [muted, setMuted] = useState(false);
   const [follow, setFollow] = useState(true);
   const [rerouting, setRerouting] = useState(false);
 
-  // Mutable navigation session (read/written only in GPS callbacks and effects).
-  const active = useRef<Active | null>(null);
+  // Mutable navigation session — read/written only in GPS callbacks and effects.
+  const session = useRef<Session | null>(null);
   const fetching = useRef(false);
   const spoken = useRef(new Set<string>());
   const offCount = useRef(0);
   const lastReroute = useRef(0);
   const arrivedFired = useRef(false);
-  const opts = useRef({ muted, follow, onPosition, onArrive });
-  useEffect(() => { opts.current = { muted, follow, onPosition, onArrive }; }, [muted, follow, onPosition, onArrive]);
+  const lastFix = useRef<Fix | null>(null);
+  const opts = useRef({ muted, follow, simulate, onPosition, onArrive });
+  useEffect(() => { opts.current = { muted, follow, simulate, onPosition, onArrive }; }, [muted, follow, simulate, onPosition, onArrive]);
 
   const fetchRoute = useCallback((from: { lat: number; lng: number }) => {
     if (fetching.current) return;
@@ -49,7 +52,7 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
     api<NavRoute>('GET', `/api/navigate?from=${from.lat},${from.lng}&to=${destination.lat},${destination.lng}`)
       .then((r) => {
         const cum = cumulative(r.geometry);
-        active.current = { route: r, cum, offsets: stepOffsets(r, cum), startedAt: Date.now(), hint: 0 };
+        session.current = { route: r, cum, offsets: stepOffsets(r, cum), startedAt: Date.now(), hint: 0 };
         spoken.current = new Set();
         setRoute(r);
       })
@@ -57,81 +60,68 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
       .finally(() => { fetching.current = false; setRerouting(false); });
   }, [destination.lat, destination.lng]);
 
-  // Called for every position (real GPS or simulated): progress, camera, voice, off-route, arrival.
-  const onFix = useCallback((p: { lat: number; lng: number; heading: number | null }) => {
-    const a = active.current;
-    if (!a) { fetchRoute(p); return; }
+  // Every position (real GPS or simulated): progress, camera, voice, off-route, arrival.
+  const onFix = useCallback((p: Fix) => {
+    const a = session.current;
+    if (!a) return fetchRoute(p);
     const s = progress(a.route, p, { cum: a.cum, offsets: a.offsets, hintIndex: a.hint });
     a.hint = s.segIndex; // keep searching forward: no snapping back on hairpins / out-and-back roads
     const o = opts.current;
     setNav({ ...s, pos: p, etaClock: new Date(Date.now() + s.remainingMin * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
     o.onPosition?.(p);
-    const heading = p.heading != null && p.heading >= 0 ? p.heading : s.heading;
     if (o.follow) {
       const c = s.offRoute ? p : s.snapped;
-      map.current?.animateCamera({ center: { latitude: c.lat, longitude: c.lng }, heading, pitch: 55, zoom: 17.5, altitude: 380 }, { duration: 900 });
+      map.current?.animateCamera({ center: toLatLng([c.lat, c.lng]), heading: p.heading != null && p.heading >= 0 ? p.heading : s.heading, pitch: 55, zoom: 17.5, altitude: 380 }, { duration: 900 });
     }
-    if (!o.muted) {
-      const say = announcement(s, spoken.current);
-      if (say) { Speech.stop(); Speech.speak(say, { language: 'en-IN', rate: 1.0 }); }
-    }
+    const speak = (text: string) => { if (!o.muted) { Speech.stop(); Speech.speak(text, { language: 'en-IN' }); } };
+    const say = announcement(s, spoken.current);
+    if (say) speak(say);
     offCount.current = s.offRoute ? offCount.current + 1 : 0;
     if (offCount.current >= 3 && Date.now() - lastReroute.current > 10000) {
       lastReroute.current = Date.now();
       offCount.current = 0;
-      if (!o.muted) Speech.speak('Rerouting', { language: 'en-IN' });
+      speak('Rerouting');
       fetchRoute(p);
     }
     if (s.arrived && !arrivedFired.current) { arrivedFired.current = true; o.onArrive?.(); }
   }, [fetchRoute]);
 
   // Real GPS drives navigation unless the emulator demo is simulating.
-  const onGps = useCallback((f: Fix) => { if (!simulate) onFix({ lat: f.lat, lng: f.lng, heading: f.heading }); }, [simulate, onFix]);
-  const { fix } = useLocation('navigation', onGps);
+  const onGps = useCallback((f: Fix) => { lastFix.current = f; if (!opts.current.simulate) onFix(f); }, [onFix]);
+  const fix = useLocation('navigation', onGps);
 
   // Simulated drive along the current route at ~40 km/h (emulator demos).
   useEffect(() => {
     if (!simulate) return;
     const id = setInterval(() => {
-      const a = active.current;
-      if (!a) { if (fix) fetchRoute(fix); return; }
-      const s = simulatedPosition(a.route, a.cum, (Date.now() - a.startedAt) / 1000, 11);
-      onFix(s);
+      const a = session.current;
+      if (a) onFix(simulatedPosition(a.route, a.cum, (Date.now() - a.startedAt) / 1000, 11));
+      else if (lastFix.current) fetchRoute(lastFix.current);
     }, 1000);
     return () => clearInterval(id);
-  }, [simulate, fix, fetchRoute, onFix]);
+  }, [simulate, fetchRoute, onFix]);
 
   useEffect(() => () => { Speech.stop(); }, []);
 
-  const remaining = route ? route.geometry.slice(Math.max(0, nav?.segIndex ?? 0)) : [];
-  const marker = nav ? (nav.offRoute ? nav.pos : nav.snapped) : null;
-  const openGoogle = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}&travelmode=driving`);
+  const coords = useMemo(() => route?.geometry.map(toLatLng) ?? [], [route]);
+  const segIndex = nav?.segIndex ?? 0;
+  const remaining = useMemo(() => coords.slice(segIndex), [coords, segIndex]);
+  const marker = nav && (nav.offRoute ? nav.pos : nav.snapped);
 
   return (
     <View style={StyleSheet.absoluteFill}>
-      <MapView
+      <AppMap
         ref={map}
-        mapType={tileMapType}
-        style={StyleSheet.absoluteFill}
         initialRegion={{ latitude: fix?.lat ?? destination.lat, longitude: fix?.lng ?? destination.lng, latitudeDelta: 0.03, longitudeDelta: 0.03 }}
         showsCompass={false}
         showsTraffic
-        pitchEnabled
-        rotateEnabled
         onPanDrag={() => setFollow(false)}
         mapPadding={{ top: 150, bottom: 220, left: 0, right: 0 }}
       >
-        <BaseTiles />
-        {remaining.length > 1 && (
-          <Polyline coordinates={remaining.map(([latitude, longitude]) => ({ latitude, longitude }))} strokeColor="#1a73e8" strokeWidth={8} lineCap="round" lineJoin="round" />
-        )}
-        <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }} title={destinationLabel} pinColor={t.accent} />
-        {marker && (
-          <Marker coordinate={{ latitude: marker.lat, longitude: marker.lng }} anchor={{ x: 0.5, y: 0.5 }} flat>
-            <Text style={{ fontSize: 30 }}>{vehicleIcon}</Text>
-          </Marker>
-        )}
-      </MapView>
+        {remaining.length > 1 && <Polyline coordinates={remaining} strokeColor="#1a73e8" strokeWidth={8} lineCap="round" lineJoin="round" />}
+        <Marker coordinate={toLatLng([destination.lat, destination.lng])} title={destinationLabel} pinColor={t.accent} />
+        {marker && <Marker coordinate={toLatLng([marker.lat, marker.lng])} anchor={{ x: 0.5, y: 0.5 }} flat><Text style={{ fontSize: 30 }}>{vehicleIcon}</Text></Marker>}
+      </AppMap>
 
       {/* Maneuver banner */}
       <View style={[styles.banner, { top: insets.top + 8, backgroundColor: t.navBanner }]}>
@@ -139,7 +129,7 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
           <>
             <Text style={styles.arrow}>{arrow(nav.next)}</Text>
             <View style={{ flex: 1 }}>
-              <Text style={styles.dist}>{nav.next.type === 'arrive' ? formatDistance(nav.remainingM) : formatDistance(nav.toNextM)}</Text>
+              <Text style={styles.dist}>{formatDistance(nav.next.type === 'arrive' ? nav.remainingM : nav.toNextM)}</Text>
               <Text style={styles.instr} numberOfLines={2}>{instruction(nav.next)}</Text>
             </View>
           </>
@@ -149,14 +139,12 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
       </View>
       {rerouting && route && <View style={[styles.reroute, { top: insets.top + 100 }]}><Text style={{ color: '#fff', fontWeight: '700' }}>Rerouting…</Text></View>}
 
-      {/* Map controls */}
       <View style={[styles.controls, { top: insets.top + 120 }]}>
-        <Pressable accessibilityLabel={muted ? 'Unmute voice' : 'Mute voice'} onPress={() => { setMuted(!muted); Speech.stop(); }} style={[styles.round, { backgroundColor: t.card }]}><Text style={{ fontSize: 20 }}>{muted ? '🔇' : '🔊'}</Text></Pressable>
-        {!follow && <Pressable accessibilityLabel="Recenter" onPress={() => setFollow(true)} style={[styles.round, { backgroundColor: t.card }]}><Text style={{ fontSize: 20 }}>🎯</Text></Pressable>}
-        <Pressable accessibilityLabel="Open in Google Maps" onPress={openGoogle} style={[styles.round, { backgroundColor: t.card }]}><Text style={{ fontSize: 18 }}>🗺️</Text></Pressable>
+        <RoundButton icon={muted ? '🔇' : '🔊'} label={muted ? 'Unmute voice' : 'Mute voice'} onPress={() => { setMuted(!muted); Speech.stop(); }} />
+        {!follow && <RoundButton icon="🎯" label="Recenter" onPress={() => setFollow(true)} />}
+        <RoundButton icon="🗺️" label="Open in Google Maps" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}&travelmode=driving`)} />
       </View>
 
-      {/* Trip strip + caller-provided actions */}
       <View style={[styles.bottom, { backgroundColor: t.card, paddingBottom: Math.max(insets.bottom, 12) }]}>
         {nav && (
           <View style={styles.etaRow}>
@@ -178,7 +166,6 @@ const styles = StyleSheet.create({
   instr: { color: '#fff', fontSize: 17, fontWeight: '600' },
   reroute: { position: 'absolute', alignSelf: 'center', backgroundColor: '#d6342c', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 99 },
   controls: { position: 'absolute', right: 12, gap: 10 },
-  round: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6 },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 14, elevation: 16, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 14 },
   etaRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 2 },
   eta: { fontSize: 24, fontWeight: '800' },

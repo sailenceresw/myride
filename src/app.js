@@ -3,12 +3,11 @@ const express = require('express');
 const { createService, HttpError } = require('./service');
 const { SERVICES, SAFETY, CITY, GANDAKI, FEDERAL_DRAFT, COMPLIANCE, VEHICLES, LOGISTICS, MEMBERSHIP, KYC, PAYROLL } = require('./config');
 const { quote, gandakiCap, federalCap } = require('./pricing');
-const { places, cities, navigationRoute, isValidPoint, haversineKm } = require('./geo');
+const { places, cities, navigationRoute, isValidPoint } = require('./geo');
 const { createFiles } = require('./files');
 const { monthly, projection, compareVersions, fleetUnitEconomics, SCENARIOS, FIXED_COSTS } = require('./economics');
 const { batchCsv } = require('./payroll');
 const payments = require('./payments');
-const { isConsole } = require('./sms');
 
 // In-process pub/sub for Server-Sent Events. Replace with Redis pub/sub when running >1 instance.
 function createBus() {
@@ -109,15 +108,10 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     return svc.quoteAll(req.body, s?.portal === 'rider' ? s.user : null);
   }));
 
-  // Uber-style "cars around you": idle online drivers within 3 km, position rounded to ~100 m, no identities.
   app.get('/api/nearby', (req, res) => {
-    const lat = +req.query.lat, lng = +req.query.lng;
-    if (!isValidPoint({ lat, lng })) return res.status(400).json({ error: 'lat,lng required' });
-    const out = store.all('drivers')
-      .filter((d) => d.online && d.status === 'idle' && d.loc && !d.suspended && haversineKm(d.loc, { lat, lng }) <= 3)
-      .slice(0, 25)
-      .map((d) => ({ lat: Math.round(d.loc.lat * 1000) / 1000, lng: Math.round(d.loc.lng * 1000) / 1000, type: d.vehicle.type, ev: d.vehicle.fuel === 'ev' }));
-    res.json(out);
+    const p = { lat: +req.query.lat, lng: +req.query.lng };
+    if (!isValidPoint(p)) return res.status(400).json({ error: 'lat,lng required' });
+    res.json(svc.nearbyDrivers(p));
   });
 
   app.get('/api/share/:token', (req, res) => {
@@ -128,9 +122,9 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
 
   // ---------- auth ----------
   app.post('/api/auth/otp', wrap(async (req) => {
-    const { code } = await svc.requestOtp(req.body.phone, { ip: req.ip });
+    const { code, provider } = await svc.requestOtp(req.body.phone, { ip: req.ip });
     // The code is only echoed back when no real SMS gateway is configured (local development).
-    return dev && isConsole() ? { sent: true, devOtp: code } : { sent: true };
+    return dev && provider === 'console' ? { sent: true, devOtp: code } : { sent: true };
   }));
   app.post('/api/auth/verify', wrap((req) => {
     const { token, user, portal } = svc.verifyOtp(req.body.phone, req.body.otp, { name: req.body.name, portal: req.body.portal || 'rider', referralCode: req.body.referralCode });
@@ -280,7 +274,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     res.setHeader('Content-Disposition', `attachment; filename="myride-payout-${b.weekId}.csv"`);
     res.send(batchCsv(b));
   });
-  app.get('/api/admin/sms', admin, (req, res) => res.json(Object.values(store.db.smsLog || {}).sort((x, y) => y.at - x.at).slice(0, 100)));
+  app.get('/api/admin/sms', admin, (req, res) => res.json(svc.smsLog()));
   app.get('/api/admin/promos', admin, (req, res) => res.json(store.all('promos')));
   app.post('/api/admin/promos', admin, wrap((req) => svc.createPromo(req.body)));
   app.get('/api/admin/economics', admin, (req, res) => res.json({
@@ -297,8 +291,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.use((err, req, res, next) => {
     const status = err.status || (err.type === 'entity.parse.failed' ? 400 : err.type === 'entity.too.large' ? 413 : 500);
     if (status >= 500) console.error(err);
-    const { expose, ...extra } = err.extra || {};
-    res.status(status).json({ error: status >= 500 && !expose ? 'Something went wrong' : err.message, ...extra });
+    res.status(status).json({ error: (err.expose ?? status < 500) ? err.message : 'Something went wrong', ...(err.extra || {}) });
   });
 
   return { app, svc, bus };

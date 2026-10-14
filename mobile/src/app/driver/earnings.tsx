@@ -1,8 +1,7 @@
-import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text } from 'react-native';
+import { ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, Row, Txt } from '@/components/ui';
+import { BackHeader, Card, Row, Txt } from '@/components/ui';
 import { api, rs } from '@/lib/api';
 import { useTheme } from '@/lib/theme';
 
@@ -22,7 +21,7 @@ export default function Earnings() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 6 }}>
-        <Row><Pressable onPress={() => router.back()} accessibilityLabel="Back"><Text style={{ fontSize: 24, color: t.ink }}>←</Text></Pressable><Txt kind="h1">Earnings</Txt></Row>
+        <BackHeader title="Earnings" kind="h1" />
         <Card>
           <Txt kind="muted">{emp ? 'Wages this week (paid Sunday)' : d.driver.wallet < 0 ? 'You owe MyRide (cash trips)' : 'Next payout (Sunday)'}</Txt>
           <Text style={{ fontSize: 34, fontWeight: '900', color: d.driver.wallet < 0 && !emp ? t.danger : t.ok }}>{rs(emp ? d.thisWeek.net : Math.abs(d.driver.wallet))}</Text>
