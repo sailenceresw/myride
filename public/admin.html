@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyRide Ops</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 18px 16px 60px; }
+    .two { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+    @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+    #map { height: 420px; border-radius: var(--radius); border: 1px solid var(--line); }
+    h2 { font-size: 1.05rem; margin: 24px 0 8px; }
+    .scroll { overflow-x: auto; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 10; }
+    .nav a { padding: 6px 10px; border-radius: 99px; border: 1px solid var(--line); text-decoration: none; font-size: .85rem; background: var(--card); }
+    .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 8px 0; }
+    .docs figure { margin: 0; font-size: .72rem; color: var(--muted); }
+    .docs img { width: 100%; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+    .bar-row { display: flex; align-items: center; gap: 8px; font-size: .8rem; }
+    .bar-row .b { height: 10px; border-radius: 3px; }
+    svg text { fill: var(--muted); font-size: 10px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar"><div><div class="logo"><span>My</span>Ride <small style="color:var(--muted);font-size:.8rem">Ops · Pokhara (wards 1–33)</small></div></div>
+    <button class="icon-btn hidden" id="logout">⎋</button></header>
+  <section id="login" style="max-width:380px"></section>
+  <section id="dash" class="hidden">
+    <nav class="nav"><a href="#live">Live</a><a href="#kycSec">Driver KYC</a><a href="#fleetSec">Fleet</a><a href="#payoutSec">Payouts</a><a href="#promoSec">Promos</a><a href="#econSec">Economics</a><a href="#drvSec">Drivers</a><a href="#tripSec">Trips</a></nav>
+    <div id="alerts"></div>
+    <div class="grid" id="tiles" style="margin-top:8px"></div>
+    <div class="two" id="live">
+      <div><h2>Live fleet & demand by ward</h2><div id="map"></div><div class="muted">Ward shading = completed pickups. Dashed line = Pokhara Metropolitan City boundary.</div></div>
+      <div><h2>Compliance (Gandaki Province)</h2><div class="card" id="compliance"></div>
+        <h2>Top wards by pickups</h2><div class="card" id="wardList"></div></div>
+    </div>
+
+    <h2 id="kycSec">Driver applications (KYC)</h2><div id="kyc"></div>
+
+    <h2 id="fleetSec">MyRide fleet vehicles</h2>
+    <div class="card"><div class="row">
+      <select id="fvType"></select><select id="fvFuel"><option value="ev">Electric</option><option value="petrol">Petrol</option><option value="diesel">Diesel</option></select>
+      <input id="fvPlate" placeholder="Plate (GA 2 JA 7777)"><input id="fvModel" placeholder="Model"><input id="fvLease" type="number" placeholder="Lease/EMI Rs/mo">
+      <button class="btn small shrink" id="fvAdd">Add vehicle</button></div>
+      <div class="scroll" id="fleet"></div></div>
+
+    <h2 id="payoutSec">Weekly payouts (Sunday, for previous Sun–Sat)</h2>
+    <div class="card"><button class="btn small" id="runPay">Run payout for last week</button> <span class="muted">Generates bank bulk-transfer file for NCHL CorporatePay / connectIPS.</span><div class="scroll" id="payouts"></div></div>
+
+    <h2 id="promoSec">Promo codes & free rides</h2>
+    <div class="card"><div class="row">
+      <input id="pCode" placeholder="CODE" maxlength="16"><select id="pType"><option value="percent">% off</option><option value="flat">Rs off</option><option value="free_ride">Free ride</option></select>
+      <input id="pVal" type="number" step="0.01" placeholder="0.2 or 50"><input id="pMax" type="number" placeholder="Max off Rs"><input id="pLimit" type="number" placeholder="Usage limit"><input id="pExp" type="date">
+      <label class="check shrink"><input type="checkbox" id="pNew"> new riders</label><button class="btn small shrink" id="pAdd">Create</button></div>
+      <p class="err" id="pErr"></p><div class="scroll" id="promos"></div></div>
+
+    <h2 id="econSec">Unit economics & ROI</h2>
+    <div class="two"><div class="card scroll" id="bridge"></div><div class="card" id="proj"></div></div>
+    <div class="card scroll" id="econ"></div>
+    <div class="card" id="fleetEcon"></div>
+
+    <h2 id="drvSec">Drivers</h2><div class="card scroll" id="drivers"></div>
+    <h2 id="tripSec">Recent trips</h2><div class="card scroll" id="trips"></div>
+  </section>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="common.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

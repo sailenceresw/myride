@@ -1,0 +1,21 @@
+{
+  "name": "myride",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "start": "node server.js",
+    "dev": "SIMULATE=1 MYRIDE_AUTO_VERIFY=1 node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "MyRide - ride-hailing and delivery for Pokhara, Nepal",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
