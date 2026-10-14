@@ -1,0 +1,11 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "development": { "developmentClient": true, "distribution": "internal" },
+    "rider": { "env": { "APP_VARIANT": "rider", "EXPO_PUBLIC_APP_VARIANT": "rider" }, "autoIncrement": true },
+    "driver": { "env": { "APP_VARIANT": "driver", "EXPO_PUBLIC_APP_VARIANT": "driver" }, "autoIncrement": true },
+    "rider-preview": { "extends": "rider", "distribution": "internal", "android": { "buildType": "apk" } },
+    "driver-preview": { "extends": "driver", "distribution": "internal", "android": { "buildType": "apk" } }
+  },
+  "submit": { "rider": {}, "driver": {} }
+}
