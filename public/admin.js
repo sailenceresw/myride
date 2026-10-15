@@ -41,7 +41,7 @@
     renderKyc(apps, fleet);
     renderFleet(fleet, drivers);
     renderPayouts(payouts);
-    $('#promos').innerHTML = `<table><tr><th>Code</th><th>Type</th><th class="num">Value</th><th class="num">Max off</th><th class="num">Used</th><th>Limits</th><th>Note</th></tr>${promos.map((p) => `<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.type)}</td><td class="num">${p.type === 'percent' ? `${Math.round(p.value * 100)}%` : p.type === 'flat' ? rs(p.value) : 'free'}</td><td class="num">${rs(p.maxOff || 0)}</td><td class="num">${p.used || 0}${p.usageLimit ? ` / ${p.usageLimit}` : ''}</td><td class="muted">${[p.oncePerUser && 'once/user', p.newUsersOnly && 'new riders', p.services && p.services.join(','), p.expiresAt && `until ${new Date(p.expiresAt).toLocaleDateString()}`].filter(Boolean).join(' · ')}</td><td class="muted">${esc(p.note || '')}</td></tr>`).join('')}</table>`;
+    $('#promos').innerHTML = `<table><tr><th>Code</th><th>Type</th><th class="num">Value</th><th class="num">Max off</th><th class="num">Used</th><th>Limits</th><th>Note</th></tr>${promos.map((p) => `<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.type)}</td><td class="num">${p.type === 'percent' ? `${Math.round(p.value * 100)}%` : p.type === 'flat' ? rs(p.value) : 'free'}</td><td class="num">${rs(p.maxOff || 0)}</td><td class="num">${p.used || 0}${p.usageLimit ? ` / ${p.usageLimit}` : ''}</td><td class="muted">${[p.oncePerUser && 'once/user', p.newUsersOnly && 'new customers', p.services && p.services.join(','), p.expiresAt && `until ${new Date(p.expiresAt).toLocaleDateString()}`].filter(Boolean).join(' · ')}</td><td class="muted">${esc(p.note || '')}</td></tr>`).join('')}</table>`;
 
     $('#drivers').innerHTML = `<table><tr><th>Name</th><th>Type</th><th>Vehicle</th><th>Status</th><th class="num">Rating</th><th class="num">Trips</th><th class="num">Wallet</th><th class="num">Cash held</th><th>Face check</th><th></th></tr>
       ${drivers.map((d) => `<tr><td>${esc(d.name)}<div class="muted">${esc(d.phone)} · ${esc(d.gender)}</div></td><td>${d.driverType === 'employee' ? '<span class="pill">fleet</span>' : 'partner'}${d.simulated ? ' <span class="muted">demo</span>' : ''}</td>
@@ -191,7 +191,7 @@
     setInterval(() => load().catch(() => {}), 5000);
     MR.events(`token=${token}`, (m) => {
       const card = (html) => $('#alerts').insertAdjacentHTML('afterbegin', `<div class="card" style="border:2px solid var(--danger)">${html}</div>`);
-      if (m.type === 'sos') card(`<b class="neg">SOS</b> trip ${esc(m.tripId)} · rider ${esc(m.rider)} · ${new Date(m.incident.at).toLocaleTimeString()} ${m.incident.loc ? `· <a target="_blank" href="https://www.openstreetmap.org/?mlat=${m.incident.loc.lat}&mlon=${m.incident.loc.lng}#map=17/${m.incident.loc.lat}/${m.incident.loc.lng}">location</a>` : ''}`);
+      if (m.type === 'sos') card(`<b class="neg">SOS</b> trip ${esc(m.tripId)} · customer ${esc(m.rider)} · ${new Date(m.incident.at).toLocaleTimeString()} ${m.incident.loc ? `· <a target="_blank" href="https://www.openstreetmap.org/?mlat=${m.incident.loc.lat}&mlon=${m.incident.loc.lng}#map=17/${m.incident.loc.lat}/${m.incident.loc.lng}">location</a>` : ''}`);
       if (m.type === 'face_fail') card(`<b class="neg">Face verification failed twice</b> — ${esc(m.name)} suspended pending review`);
       if (m.type === 'kyc_submitted') toast('New driver application to review');
     });

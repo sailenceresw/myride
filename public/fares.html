@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="/mark.svg" type="image/svg+xml">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MyRide Fare Chart</title>
   <meta name="description" content="MyRide motorcycle and car fares in Pokhara compared with the Gandaki legal maximum, Nepal's draft national cap and other apps.">
@@ -30,7 +31,7 @@
     const comp = r.samples[0].competitors.map((c) => c.name);
     return `<h2>${esc(r.label)} <span class="muted">· ${esc(r.labelNe)}</span></h2>
       <div class="card"><div class="kv"><span>MyRide tariff</span><b>Rs ${r.base} + Rs ${r.perKm}/km · minimum ${rs(r.minFare)}</b></div>
-      <div class="scroll"><table><tr><th class="num">km</th><th class="num">MyRide</th><th class="num">Driver earns</th><th class="num">Gandaki max</th>${fd.applied ? '<th class="num">National draft max</th>' : ''}${comp.map((c) => `<th class="num">${esc(c)} (est.)</th>`).join('')}</tr>
+      <div class="scroll"><table><tr><th class="num">km</th><th class="num">MyRide</th><th class="num">Rider earns</th><th class="num">Gandaki max</th>${fd.applied ? '<th class="num">National draft max</th>' : ''}${comp.map((c) => `<th class="num">${esc(c)} (est.)</th>`).join('')}</tr>
       ${r.samples.map((s) => `<tr><td class="num">${s.km}</td><td class="num"><b>${rs(s.fare)}</b></td><td class="num">${rs(s.driver)}</td><td class="num">${rs(s.gandakiMax)}</td>${fd.applied ? `<td class="num">${s.federalMax ? rs(s.federalMax) : '—'}</td>` : ''}${s.competitors.map((c) => `<td class="num ${c.estimate > s.fare ? '' : 'neg'}">${rs(c.estimate)}</td>`).join('')}</tr>`).join('')}</table></div></div>`;
   }).join('');
   document.getElementById('out').innerHTML = `
