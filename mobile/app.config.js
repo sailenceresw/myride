@@ -1,9 +1,9 @@
 // One codebase, two store apps (like Uber / Uber Driver):
-//   rider  → "MyRide"        np.myride.app
-//   driver → "MyRide Drive"  np.myride.driver
-// Choose with APP_VARIANT=driver (see scripts/start.js and eas.json).
-const VARIANT = process.env.APP_VARIANT === 'driver' ? 'driver' : 'rider';
-const DRIVER = VARIANT === 'driver';
+//   customer → "MyRide"        np.myride.app     (customers book rides, parcels, logistics; can apply to become a rider)
+//   drive    → "MyRide Drive"  np.myride.driver  (approved riders drive and earn)
+// Choose with APP_VARIANT=drive (see scripts/start.js and eas.json).
+const VARIANT = process.env.APP_VARIANT === 'drive' ? 'drive' : 'customer';
+const DRIVER = VARIANT === 'drive';
 const asset = (name) => `./assets/${name}${DRIVER ? '-driver' : ''}.png`; // each app has its own icon set
 
 module.exports = ({ config }) => ({

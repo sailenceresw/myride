@@ -51,7 +51,7 @@ export default function DriverHome() {
     if (!r) return;
     setDash(r);
     const fc = r.driver?.faceCheck;
-    if (fc?.pending && promptedCheck.current !== fc.requestedAt) { promptedCheck.current = fc.requestedAt; router.push('/driver/selfie'); } // once per check
+    if (fc?.pending && promptedCheck.current !== fc.requestedAt) { promptedCheck.current = fc.requestedAt; router.push('/drive/selfie'); } // once per check
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -99,7 +99,7 @@ export default function DriverHome() {
   async function run(fn: () => Promise<unknown>) {
     setErr(''); setBusy(true);
     try { await fn(); } catch (e) {
-      if (e instanceof ApiError && e.status === 428) router.push('/driver/selfie'); else setErr((e as Error).message);
+      if (e instanceof ApiError && e.status === 428) router.push('/drive/selfie'); else setErr((e as Error).message);
     }
     setBusy(false);
   }
@@ -146,7 +146,7 @@ export default function DriverHome() {
         </Hero>
         <View style={{ padding: 16, marginTop: -24, gap: 10 }}>
           <Card raised>{steps.map(([icon, title, subtitle]) => <ListRow key={title} icon={icon} title={title} subtitle={subtitle} right={submitted ? <Icon name="checkmark-circle" size={20} color={t.ok} /> : undefined} />)}</Card>
-          {!submitted && <Button title={dash.application ? 'Continue application' : 'Start application'} icon="arrow-forward" onPress={() => router.push('/driver/apply')} />}
+          {!submitted && <Button title={dash.application ? 'Continue application' : 'Start application'} icon="arrow-forward" onPress={() => router.push('/drive/apply')} />}
           <Button title="Check status" icon="refresh" kind="soft" onPress={load} />
           <Button title="Sign out" kind="ghost" onPress={signOut} />
         </View>
@@ -206,14 +206,14 @@ export default function DriverHome() {
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
         <RoundButton icon="log-out-outline" label="Sign out" onPress={signOut} />
-        <Pressable onPress={() => router.push('/driver/earnings')} style={[styles.earn, shadow(8), { backgroundColor: t.ink }]} accessibilityLabel="Earnings and payouts">
+        <Pressable onPress={() => router.push('/drive/earnings')} style={[styles.earn, shadow(8), { backgroundColor: t.ink }]} accessibilityLabel="Earnings and payouts">
           <View style={[styles.status, { backgroundColor: online ? '#35d07f' : '#8a9997' }]} />
           <View style={{ alignItems: 'center' }}>
             <Text style={{ color: t.card, fontWeight: '900', fontSize: 19 }}>{d?.driverType === 'employee' ? `${d.earnings.trips} trips` : rs(d?.earnings.today ?? 0)}</Text>
             <Text style={{ color: t.card, opacity: 0.7, fontSize: 11, fontWeight: '600' }}>{d?.driverType === 'employee' ? 'MyRide fleet · today' : 'earned today'}</Text>
           </View>
         </Pressable>
-        <RoundButton icon="wallet-outline" label="Earnings and payouts" onPress={() => router.push('/driver/earnings')} />
+        <RoundButton icon="wallet-outline" label="Earnings and payouts" onPress={() => router.push('/drive/earnings')} />
       </View>
 
       {!online && !trip && !d?.suspended && (

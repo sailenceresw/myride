@@ -1,12 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button, Hero, Icon, Pill, Row, Txt, type IconName } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { IS_DRIVER, PHONE_RE } from '@/lib/config';
+import { IS_DRIVE, PHONE_RE } from '@/lib/config';
 import { shadow, useTheme } from '@/lib/theme';
 
-const PERKS: [IconName, string][] = IS_DRIVER
+const PERKS: [IconName, string][] = IS_DRIVE
   ? [['wallet-outline', 'Weekly payouts'], ['shield-checkmark-outline', 'Verified customers'], ['time-outline', 'Your hours']]
   : [['pricetag-outline', 'No surge'], ['map-outline', 'All 33 wards'], ['gift-outline', 'First ride free']];
 
@@ -22,6 +22,7 @@ export default function Login() {
   const [err, setErr] = useState('');
   const [devOtp, setDevOtp] = useState<string | undefined>();
   const [cooldown, setCooldown] = useState(0);
+  const [toRider, setToRider] = useState(false); // customer app: continue to the rider application after sign-in
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -48,7 +49,9 @@ export default function Login() {
     setBusy(true);
     try {
       await verifyOtp(phone, otp, name, referral);
-      router.replace('/');
+      if (!toRider) return router.replace('/');
+      router.replace('/customer');
+      router.push('/customer/apply');
     } catch (e) { setErr((e as Error).message); setBusy(false); }
   }
 
@@ -59,8 +62,8 @@ export default function Login() {
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
           <Hero style={{ paddingBottom: 56 }}>
             <Logo />
-            <Text style={styles.brand}>{IS_DRIVER ? 'MyRide Drive' : 'MyRide'}</Text>
-            <Text style={styles.tagline}>{IS_DRIVER ? 'Drive, deliver and haul in Pokhara.' : 'Rides, parcels and logistics across Pokhara.'}</Text>
+            <Text style={styles.brand}>{IS_DRIVE ? 'MyRide Drive' : 'MyRide'}</Text>
+            <Text style={styles.tagline}>{IS_DRIVE ? 'Drive, deliver and haul in Pokhara.' : 'Rides, parcels and logistics across Pokhara.'}</Text>
             <Row style={{ flexWrap: 'wrap', marginTop: 16 }}>
               {PERKS.map(([icon, text]) => <View key={text} style={styles.perk}><Icon name={icon} size={14} color="#fff" /><Text style={styles.perkText}>{text}</Text></View>)}
             </Row>
@@ -96,7 +99,7 @@ export default function Login() {
                 <CodeBoxes value={otp} onChange={setOtp} />
                 {devOtp && <Pill icon="construct-outline" text={`Dev mode · code ${devOtp}`} color={t.accent} tint={t.accentSoft} />}
                 <TextInput value={name} onChangeText={setName} placeholder="Your name (new accounts)" placeholderTextColor={t.muted} style={input} autoComplete="name" textContentType="name" />
-                {!IS_DRIVER && <TextInput value={referral} onChangeText={(v) => setReferral(v.toUpperCase())} placeholder="Friend's referral code (optional)" placeholderTextColor={t.muted} style={input} autoCapitalize="characters" maxLength={8} />}
+                {!IS_DRIVE && <TextInput value={referral} onChangeText={(v) => setReferral(v.toUpperCase())} placeholder="Friend's referral code (optional)" placeholderTextColor={t.muted} style={input} autoCapitalize="characters" maxLength={8} />}
                 <Button title="Verify & continue" icon="checkmark" onPress={verify} loading={busy} disabled={otp.length !== 6} />
                 <Row>
                   <Button title={cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'} kind="ghost" disabled={cooldown > 0 || busy} onPress={send} style={{ flex: 1 }} />
@@ -107,9 +110,20 @@ export default function Login() {
             {!!err && <Row><Icon name="alert-circle" size={18} color={t.danger} /><Text style={{ color: t.danger, fontSize: 14, flex: 1 }}>{err}</Text></Row>}
           </View>
 
+          {!IS_DRIVE && (
+            <Pressable onPress={() => setToRider(!toRider)} accessibilityRole="checkbox" accessibilityState={{ checked: toRider }} style={[styles.earn, { backgroundColor: t.card, borderColor: toRider ? t.brand : t.line }]}>
+              <Text style={{ fontSize: 30 }}>🏍️</Text>
+              <View style={{ flex: 1 }}>
+                <Txt style={{ fontWeight: '800' }}>Want to earn with MyRide?</Txt>
+                <Txt kind="small">{toRider ? "After signing in you'll go straight to the rider application." : 'Apply to become a rider with your motorcycle, car or van.'}</Txt>
+              </View>
+              <Icon name={toRider ? 'checkbox' : 'square-outline'} size={24} color={toRider ? t.brand : t.muted} />
+            </Pressable>
+          )}
+
           <Row style={{ justifyContent: 'center', marginTop: 'auto', paddingVertical: 20, paddingHorizontal: 16 }}>
             <Icon name="lock-closed" size={13} color={t.muted} />
-            <Txt kind="small">Your number is only shared with your {IS_DRIVER ? 'customer' : 'rider'} during a trip</Txt>
+            <Txt kind="small">Your number is only shared with your {IS_DRIVE ? 'customer' : 'rider'} during a trip</Txt>
           </Row>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -122,7 +136,7 @@ export function Logo({ size = 60 }: { size?: number }) {
   const t = useTheme();
   return (
     <View style={[styles.logo, shadow(6), { width: size, height: size, borderRadius: size * 0.28 }]}>
-      <Icon name="navigate" size={size * 0.52} color={IS_DRIVER ? '#101a19' : t.brand} />
+      <Icon name="navigate" size={size * 0.52} color={IS_DRIVE ? '#101a19' : t.brand} />
     </View>
   );
 }
@@ -165,4 +179,5 @@ const styles = StyleSheet.create({
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 14 },
   input: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, fontSize: 16 },
   box: { width: 46, height: 56, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  earn: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 14, borderRadius: 20, borderWidth: 1.5, padding: 16 },
 });

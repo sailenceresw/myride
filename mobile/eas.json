@@ -2,10 +2,10 @@
   "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
   "build": {
     "development": { "developmentClient": true, "distribution": "internal" },
-    "rider": { "env": { "APP_VARIANT": "rider", "EXPO_PUBLIC_APP_VARIANT": "rider" }, "autoIncrement": true },
-    "driver": { "env": { "APP_VARIANT": "driver", "EXPO_PUBLIC_APP_VARIANT": "driver" }, "autoIncrement": true },
-    "rider-preview": { "extends": "rider", "distribution": "internal", "android": { "buildType": "apk" } },
-    "driver-preview": { "extends": "driver", "distribution": "internal", "android": { "buildType": "apk" } }
+    "customer": { "env": { "APP_VARIANT": "customer", "EXPO_PUBLIC_APP_VARIANT": "customer" }, "autoIncrement": true },
+    "drive": { "env": { "APP_VARIANT": "drive", "EXPO_PUBLIC_APP_VARIANT": "drive" }, "autoIncrement": true },
+    "customer-preview": { "extends": "customer", "distribution": "internal", "android": { "buildType": "apk" } },
+    "drive-preview": { "extends": "drive", "distribution": "internal", "android": { "buildType": "apk" } }
   },
-  "submit": { "rider": {}, "driver": {} }
+  "submit": { "customer": {}, "drive": {} }
 }

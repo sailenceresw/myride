@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Avatar, BackHeader, Button, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
@@ -6,6 +7,11 @@ import { useAuth } from '@/lib/auth';
 import { shadow, useTheme } from '@/lib/theme';
 
 type Plans = Record<'plus_monthly' | 'plus_yearly', { label: string; price: number }>;
+const RIDER_STATUS: Record<string, string> = {
+  none: 'Earn with your motorcycle, car or van. Weekly payouts to your bank.', draft: 'Continue your application',
+  submitted: 'Application under review (usually within 48 hours)', resubmit: 'MyRide asked you to update your application',
+  rejected: 'Your application was not approved', approved: 'Sign in to the MyRide Drive app with this number to earn',
+};
 const PERKS = ['5% off every trip (up to Rs 25)', '3 free cancellations a month', 'Priority matching at busy times', 'No cash-on-delivery fee'];
 
 export default function Account() {
@@ -88,7 +94,8 @@ export default function Account() {
           </Card>
 
           <Card>
-            <ListRow icon="car-sport" title="Become a MyRide rider" subtitle="Earn with your motorcycle, car or van. Get the MyRide Drive app — weekly payouts to your bank." />
+            <ListRow icon="car-sport" title={profile.isDriver ? "You're a MyRide rider" : 'Become a MyRide rider'} subtitle={RIDER_STATUS[profile.isDriver ? 'approved' : profile.driverApplication?.status ?? 'none']} onPress={() => router.push('/customer/apply')} />
+            <ListRow icon="pricetags-outline" title="Fare chart" subtitle="MyRide fares vs the legal maximum, Pathao and Yango" onPress={() => router.push('/customer/fares')} />
             <ListRow icon="shield-checkmark" title="Safety" subtitle="SOS calls Nepal Police (100) and alerts MyRide ops. Share your trip live." />
           </Card>
 
