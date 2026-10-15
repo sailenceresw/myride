@@ -1,11 +1,14 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Txt } from '@/components/ui';
+import { Button, Hero, Icon, Pill, Row, Txt, type IconName } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { IS_DRIVER, PHONE_RE } from '@/lib/config';
-import { useTheme } from '@/lib/theme';
+import { shadow, useTheme } from '@/lib/theme';
+
+const PERKS: [IconName, string][] = IS_DRIVER
+  ? [['wallet-outline', 'Weekly payouts'], ['shield-checkmark-outline', 'Verified customers'], ['time-outline', 'Your hours']]
+  : [['pricetag-outline', 'No surge'], ['map-outline', 'All 33 wards'], ['gift-outline', 'First ride free']];
 
 export default function Login() {
   const t = useTheme();
@@ -49,69 +52,117 @@ export default function Login() {
     } catch (e) { setErr((e as Error).message); setBusy(false); }
   }
 
-  const input = [styles.input, { borderColor: t.line, color: t.ink, backgroundColor: t.card }];
+  const input = [styles.input, { borderColor: t.line, color: t.ink, backgroundColor: t.bg }];
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 22, gap: 10 }} keyboardShouldPersistTaps="handled">
-          <View style={[styles.logo, { backgroundColor: t.brand }]}><Text style={styles.logoText}>My</Text></View>
-          <Txt kind="h1">{IS_DRIVER ? 'MyRide Drive' : 'MyRide'}</Txt>
-          <Txt kind="muted">{IS_DRIVER ? 'Drive, deliver and haul in Pokhara. Weekly payouts to your bank.' : 'Rides, parcels and logistics across all 33 wards of Pokhara.'}</Txt>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+          <Hero style={{ paddingBottom: 56 }}>
+            <Logo />
+            <Text style={styles.brand}>{IS_DRIVER ? 'MyRide Drive' : 'MyRide'}</Text>
+            <Text style={styles.tagline}>{IS_DRIVER ? 'Drive, deliver and haul in Pokhara.' : 'Rides, parcels and logistics across Pokhara.'}</Text>
+            <Row style={{ flexWrap: 'wrap', marginTop: 16 }}>
+              {PERKS.map(([icon, text]) => <View key={text} style={styles.perk}><Icon name={icon} size={14} color="#fff" /><Text style={styles.perkText}>{text}</Text></View>)}
+            </Row>
+          </Hero>
 
-          {step === 'phone' ? (
-            <>
-              <Txt kind="small" style={{ marginTop: 16 }}>Mobile number</Txt>
-              <View style={[styles.phoneRow, { borderColor: t.line, backgroundColor: t.card }]}>
-                <Text style={{ color: t.muted, fontSize: 17 }}>🇳🇵 +977</Text>
-                <TextInput
-                  value={phone}
-                  onChangeText={(v) => setPhone(v.replace(/\D/g, '').slice(0, 10))}
-                  keyboardType="phone-pad"
-                  textContentType="telephoneNumber"
-                  autoComplete="tel"
-                  placeholder="98XXXXXXXX"
-                  placeholderTextColor={t.muted}
-                  style={{ flex: 1, fontSize: 18, color: t.ink, paddingVertical: 12 }}
-                  accessibilityLabel="Mobile number"
-                />
-              </View>
-              <Txt kind="small">{"We'll send a 6-digit code by SMS."}</Txt>
-              <Button title="Continue" onPress={send} loading={busy} />
-            </>
-          ) : (
-            <>
-              <Txt kind="muted" style={{ marginTop: 16 }}>Enter the code sent to +977 {phone}</Txt>
-              <TextInput
-                value={otp}
-                onChangeText={(v) => setOtp(v.replace(/\D/g, '').slice(0, 6))}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="sms-otp"
-                autoFocus
-                maxLength={6}
-                placeholder="••••••"
-                placeholderTextColor={t.muted}
-                style={[...input, { fontSize: 28, letterSpacing: 10, textAlign: 'center', fontWeight: '800' }]}
-                accessibilityLabel="SMS code"
-              />
-              {devOtp && <Txt kind="small">Development mode (no SMS gateway) — your code is {devOtp}</Txt>}
-              <TextInput value={name} onChangeText={setName} placeholder="Your name (new accounts)" placeholderTextColor={t.muted} style={input} autoComplete="name" textContentType="name" />
-              {!IS_DRIVER && <TextInput value={referral} onChangeText={(v) => setReferral(v.toUpperCase())} placeholder="Friend's referral code (optional)" placeholderTextColor={t.muted} style={input} autoCapitalize="characters" maxLength={8} />}
-              <Button title="Verify & continue" onPress={verify} loading={busy} />
-              <Button title={cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'} kind="ghost" disabled={cooldown > 0 || busy} onPress={send} />
-              <Button title="Change number" kind="ghost" onPress={() => { setStep('phone'); setOtp(''); }} />
-            </>
-          )}
-          {!!err && <Text style={{ color: t.danger, fontSize: 14 }}>{err}</Text>}
+          <View style={[styles.form, shadow(10), { backgroundColor: t.card }]}>
+            {step === 'phone' ? (
+              <>
+                <Txt kind="h2">Enter your mobile number</Txt>
+                <Txt kind="muted">{"We'll text you a 6-digit code."}</Txt>
+                <View style={[styles.phoneRow, { borderColor: phone.length === 10 ? t.brand : t.line, backgroundColor: t.bg }]}>
+                  <Text style={{ fontSize: 18 }}>🇳🇵</Text>
+                  <Text style={{ color: t.ink, fontSize: 17, fontWeight: '700' }}>+977</Text>
+                  <View style={{ width: 1, height: 24, backgroundColor: t.line }} />
+                  <TextInput
+                    value={phone}
+                    onChangeText={(v) => setPhone(v.replace(/\D/g, '').slice(0, 10))}
+                    keyboardType="phone-pad"
+                    textContentType="telephoneNumber"
+                    autoComplete="tel"
+                    placeholder="98XXXXXXXX"
+                    placeholderTextColor={t.muted}
+                    style={{ flex: 1, fontSize: 19, fontWeight: '600', color: t.ink, paddingVertical: 14, letterSpacing: 1 }}
+                    accessibilityLabel="Mobile number"
+                  />
+                </View>
+                <Button title="Continue" icon="arrow-forward" onPress={send} loading={busy} disabled={phone.length !== 10} />
+              </>
+            ) : (
+              <>
+                <Txt kind="h2">Enter the code</Txt>
+                <Txt kind="muted">Sent by SMS to +977 {phone}</Txt>
+                <CodeBoxes value={otp} onChange={setOtp} />
+                {devOtp && <Pill icon="construct-outline" text={`Dev mode · code ${devOtp}`} color={t.accent} tint={t.accentSoft} />}
+                <TextInput value={name} onChangeText={setName} placeholder="Your name (new accounts)" placeholderTextColor={t.muted} style={input} autoComplete="name" textContentType="name" />
+                {!IS_DRIVER && <TextInput value={referral} onChangeText={(v) => setReferral(v.toUpperCase())} placeholder="Friend's referral code (optional)" placeholderTextColor={t.muted} style={input} autoCapitalize="characters" maxLength={8} />}
+                <Button title="Verify & continue" icon="checkmark" onPress={verify} loading={busy} disabled={otp.length !== 6} />
+                <Row>
+                  <Button title={cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'} kind="ghost" disabled={cooldown > 0 || busy} onPress={send} style={{ flex: 1 }} />
+                  <Button title="Change number" kind="ghost" onPress={() => { setStep('phone'); setOtp(''); }} style={{ flex: 1 }} />
+                </Row>
+              </>
+            )}
+            {!!err && <Row><Icon name="alert-circle" size={18} color={t.danger} /><Text style={{ color: t.danger, fontSize: 14, flex: 1 }}>{err}</Text></Row>}
+          </View>
+
+          <Row style={{ justifyContent: 'center', marginTop: 'auto', paddingVertical: 20, paddingHorizontal: 16 }}>
+            <Icon name="lock-closed" size={13} color={t.muted} />
+            <Txt kind="small">Your number is only shared with your {IS_DRIVER ? 'customer' : 'rider'} during a trip</Txt>
+          </Row>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
+  );
+}
+
+/** App mark: a navigation arrow on a white tile (teal for MyRide, ink for MyRide Drive). */
+export function Logo({ size = 60 }: { size?: number }) {
+  const t = useTheme();
+  return (
+    <View style={[styles.logo, shadow(6), { width: size, height: size, borderRadius: size * 0.28 }]}>
+      <Icon name="navigate" size={size * 0.52} color={IS_DRIVER ? '#101a19' : t.brand} />
+    </View>
+  );
+}
+
+/** Six code boxes drawn under one transparent input (keeps SMS auto-fill and paste working). */
+function CodeBoxes({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useTheme();
+  return (
+    <View style={{ marginVertical: 6 }}>
+      <Row style={{ justifyContent: 'space-between' }}>
+        {Array.from({ length: 6 }, (_, i) => (
+          <View key={i} style={[styles.box, { borderColor: i === value.length ? t.brand : value[i] ? t.ink : t.line, backgroundColor: t.bg }]}>
+            <Text style={{ fontSize: 24, fontWeight: '800', color: t.ink }}>{value[i] ?? ''}</Text>
+          </View>
+        ))}
+      </Row>
+      <TextInput
+        value={value}
+        onChangeText={(v) => onChange(v.replace(/\D/g, '').slice(0, 6))}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="sms-otp"
+        autoFocus
+        maxLength={6}
+        caretHidden
+        style={[StyleSheet.absoluteFill, { opacity: 0.011 }]} // invisible but still focusable (Android ignores a transparent text colour)
+        accessibilityLabel="SMS code"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  logo: { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  logoText: { color: '#fff', fontWeight: '900', fontSize: 22 },
-  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
+  logo: { backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  brand: { color: '#fff', fontSize: 34, fontWeight: '900', letterSpacing: -0.5 },
+  tagline: { color: '#ffffffd0', fontSize: 15, marginTop: 4 },
+  perk: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#ffffff22', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6 },
+  perkText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  form: { marginHorizontal: 16, marginTop: -32, borderRadius: 24, padding: 20, gap: 12 },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 14 },
+  input: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, fontSize: 16 },
+  box: { width: 46, height: 56, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 });

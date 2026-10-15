@@ -69,12 +69,16 @@ const layer=L.layerGroup().addTo(map);let pad={top:0,right:0,bottom:0,left:0};
 const icon=m=>L.divIcon({iconSize:[40,40],html:m.me?'<div class="me" style="margin:10px"></div>':m.emoji?'<div class="e" style="font-size:'+(m.size||24)+'px;margin-top:'+(20-(m.size||24)/2)+'px">'+m.emoji+'</div>':'<div class="pin" style="margin:9px;background:'+m.color+'"></div>'});
 const send=t=>window.ReactNativeWebView.postMessage(t);
 map.on('dragstart',()=>send('pan'));
-window.mr={
+// Camera moves run one at a time (latest wins): Leaflet drops or overrides a move made while another animates.
+let busy=false,next=null;
+const move=(f,ms)=>{if(busy){next=[f,ms];return;}busy=true;let done=false;
+  const end=()=>{if(done)return;done=true;busy=false;const n=next;next=null;if(n)move(...n);};
+  map.once('moveend',end);setTimeout(end,ms+400);f();};window.mr={
   draw(s){pad=s.pad;layer.clearLayers();
     s.lines.forEach(l=>L.polyline(l.coords.map(p=>[p.lat,p.lng]),{color:l.color,weight:l.width,lineCap:'round',lineJoin:'round'}).addTo(layer));
     s.markers.forEach(m=>L.marker([m.at.lat,m.at.lng],{icon:icon(m),title:m.title||''}).addTo(layer));},
-  fly(c,z,ms){const p=map.project([c.lat,c.lng],z).add([(pad.right-pad.left)/2,(pad.bottom-pad.top)/2]);map.setView(map.unproject(p,z),z,{animate:true,duration:ms/1000});},
-  fit(pts,p){if(pts.length)map.fitBounds(pts.map(x=>[x.lat,x.lng]),{paddingTopLeft:[p.left,p.top],paddingBottomRight:[p.right,p.bottom]});}
+  fly(c,z,ms){move(()=>{const p=map.project([c.lat,c.lng],z).add([(pad.right-pad.left)/2,(pad.bottom-pad.top)/2]);map.setView(map.unproject(p,z),z,{animate:true,duration:ms/1000});},ms);},
+  fit(pts,p){if(pts.length)move(()=>map.fitBounds(pts.map(x=>[x.lat,x.lng]),{paddingTopLeft:[p.left,p.top],paddingBottomRight:[p.right,p.bottom]}),600);}
 };send('ready');
 </script></body></html>`;
 
