@@ -137,9 +137,9 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
       {rerouting && route && <View style={[styles.reroute, { top: insets.top + 100 }]}><Text style={{ color: '#fff', fontWeight: '700' }}>Rerouting…</Text></View>}
 
       <View style={[styles.controls, { top: insets.top + 120 }]}>
-        <RoundButton icon={muted ? '🔇' : '🔊'} label={muted ? 'Unmute voice' : 'Mute voice'} onPress={() => { setMuted(!muted); Speech.stop(); }} />
-        {!follow && <RoundButton icon="🎯" label="Recenter" onPress={() => setFollow(true)} />}
-        <RoundButton icon="🗺️" label="Open in Google Maps" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}&travelmode=driving`)} />
+        <RoundButton icon={muted ? 'volume-mute' : 'volume-high'} label={muted ? 'Unmute voice' : 'Mute voice'} onPress={() => { setMuted(!muted); Speech.stop(); }} />
+        {!follow && <RoundButton icon="navigate" label="Recenter" onPress={() => setFollow(true)} />}
+        <RoundButton icon="map" label="Open in Google Maps" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}&travelmode=driving`)} />
       </View>
 
       <View style={[styles.bottom, { backgroundColor: t.card, paddingBottom: Math.max(insets.bottom, 12) }]}>

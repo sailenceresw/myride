@@ -7,13 +7,13 @@ const TOKEN_RE = /^Expo(nent)?PushToken\[[\w-]+\]$/;
 
 // What each status means to the person being notified. `url` is the screen the app opens when tapped.
 const RIDER = {
-  accepted: ['Driver on the way', (t) => `${t.driver?.name ?? 'Your driver'} · ${t.driver?.vehicle?.plate ?? ''}`],
-  arrived: ['Your driver has arrived', (t) => `Meet at ${t.pickup.label}. Your PIN is ${t.pin}`],
+  accepted: ['Your rider is on the way', (t) => `${t.driver?.name ?? 'Your rider'} · ${t.driver?.vehicle?.plate ?? ''}`],
+  arrived: ['Your rider has arrived', (t) => `Meet at ${t.pickup.label}. Your PIN is ${t.pin}`],
   completed: ['You have arrived', (t) => (t.fare ? `Fare Rs ${t.fare}. Rate your trip` : 'Free ride! Rate your trip')],
   cancelled: ['Trip cancelled', () => 'Book again any time'],
-  no_driver: ['No drivers available', () => 'Please try again in a few minutes'],
+  no_driver: ['No riders available', () => 'Please try again in a few minutes'],
 };
-const DRIVER = { cancelled: ['Trip cancelled', (t) => `${t.riderName} cancelled the trip`] };
+const DRIVER = { cancelled: ['Trip cancelled', (t) => `${t.riderName} (customer) cancelled the trip`] };
 
 /** Map one bus message to a notification for its recipient, or null if it isn't worth a push. */
 function notificationFor(msg) {

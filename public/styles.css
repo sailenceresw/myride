@@ -33,8 +33,10 @@ a { color: var(--brand); }
 .map-wrap { position: relative; }
 
 header.bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.logo { font-weight: 800; font-size: 1.35rem; letter-spacing: -.02em; color: var(--brand); display: flex; align-items: center; gap: 8px; }
-.logo span { background: var(--brand); color: #fff; border-radius: 8px; padding: 1px 7px; font-size: .95rem; }
+.logo { font-weight: 800; font-size: 1.35rem; letter-spacing: -.02em; color: var(--brand); display: flex; align-items: center; }
+.logo::before { content: ''; width: 30px; height: 30px; border-radius: 9px; background: url(/mark.svg) center / cover; box-shadow: 0 2px 6px rgba(5,69,62,.25); flex: none; margin-right: 9px; }
+.logo > span:first-child { color: inherit; }
+.logo > small, .logo > .pill { margin-left: 8px; }
 .sub { color: var(--muted); font-size: .85rem; }
 
 .tabs { display: flex; gap: 6px; background: var(--bg); border-radius: 12px; padding: 4px; margin: 10px 0 14px; }

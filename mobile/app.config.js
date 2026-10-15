@@ -4,6 +4,7 @@
 // Choose with APP_VARIANT=driver (see scripts/start.js and eas.json).
 const VARIANT = process.env.APP_VARIANT === 'driver' ? 'driver' : 'rider';
 const DRIVER = VARIANT === 'driver';
+const asset = (name) => `./assets/${name}${DRIVER ? '-driver' : ''}.png`; // each app has its own icon set
 
 module.exports = ({ config }) => ({
   ...config,
@@ -13,8 +14,8 @@ module.exports = ({ config }) => ({
   version: '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
-  icon: './assets/icon.png',
-  splash: { image: './assets/splash-icon.png', resizeMode: 'contain', backgroundColor: DRIVER ? '#075a52' : '#0b7a6f' },
+  icon: asset('icon'),
+  splash: { image: asset('splash-icon'), resizeMode: 'contain', imageWidth: 200, backgroundColor: DRIVER ? '#101a19' : '#0b7a6f' },
   ios: {
     bundleIdentifier: DRIVER ? 'np.myride.driver' : 'np.myride.app',
     supportsTablet: false,
@@ -28,9 +29,9 @@ module.exports = ({ config }) => ({
   android: {
     package: DRIVER ? 'np.myride.driver' : 'np.myride.app',
     adaptiveIcon: {
-      backgroundColor: DRIVER ? '#075a52' : '#0b7a6f',
-      foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: './assets/android-icon-background.png',
+      backgroundColor: DRIVER ? '#101a19' : '#0b7a6f',
+      foregroundImage: asset('android-icon-foreground'),
+      backgroundImage: asset('android-icon-background'),
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', ...(DRIVER ? ['CAMERA', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION'] : [])],

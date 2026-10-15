@@ -1,13 +1,23 @@
 import { useColorScheme } from 'react-native';
+import { IS_DRIVER } from './config';
 
 const light = {
-  brand: '#0b7a6f', accent: '#f29e1f', danger: '#d6342c', ok: '#1f9d55',
-  ink: '#17201f', muted: '#5d6b69', line: '#dfe6e4', bg: '#f4f7f6', card: '#ffffff', navBanner: '#0b7a6f',
+  brand: '#0b7a6f', brandDark: '#075a52', brandSoft: '#e2f3f0', accent: '#f29e1f', accentSoft: '#fff2dc',
+  danger: '#d6342c', dangerSoft: '#fdecea', ok: '#1f9d55', okSoft: '#e5f5eb',
+  ink: '#101a19', muted: '#5f6d6b', line: '#e3e9e7', bg: '#f3f6f5', card: '#ffffff', chip: '#edf2f1', navBanner: '#0b7a6f',
 };
-const dark: typeof light = { ...light, ink: '#e8efee', muted: '#9db0ad', line: '#2b3735', bg: '#0f1615', card: '#172120', navBanner: '#075a52' };
+const dark: typeof light = {
+  ...light, brandSoft: '#123430', accentSoft: '#3b2b10', dangerSoft: '#3d1715', okSoft: '#11301f',
+  ink: '#e9f0ef', muted: '#9fb1ae', line: '#2a3634', bg: '#0d1413', card: '#162020', chip: '#1e2a29', navBanner: '#075a52',
+};
 
 export type Theme = typeof light;
 export const useTheme = (): Theme => (useColorScheme() === 'dark' ? dark : light);
+
+/** Brand gradient: teal for MyRide, near-black for MyRide Drive (like Uber vs Uber Driver). */
+export const GRADIENT = (IS_DRIVER ? ['#1f2e2c', '#070b0b'] : ['#119a8a', '#065249']) as [string, string];
+export const RADIUS = { sm: 10, md: 14, lg: 20, pill: 999 };
+export const shadow = (e = 6) => ({ shadowColor: '#0b1f1c', shadowOpacity: 0.14, shadowRadius: e * 1.6, shadowOffset: { width: 0, height: e / 2 }, elevation: e });
 
 // One icon table for vehicle types and the services that use them.
 const ICONS: Record<string, string> = {

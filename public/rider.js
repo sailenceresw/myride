@@ -133,7 +133,7 @@
       const disc = q.discounts.map((d) => `${esc(d.label)} −${rs(d.amount)}`).join(' · ');
       return `<div class="card quote ${S.sel === q.service ? 'sel' : ''}" data-s="${q.service}">
         <div><div class="name">${esc(ne ? svc.labelNe : q.label)} ${svc.fuel === 'ev' ? '<span class="pill ev">EV</span>' : ''} ${q.intercity ? '<span class="pill">intercity</span>' : ''} ${S.recommend === q.service ? '<span class="pill" style="background:var(--accent);color:#1d1405">recommended for hill roads</span>' : ''}</div>
-          <div class="meta">${q.available ? `${q.available} nearby` : '<span class="pill warn">few drivers nearby</span>'} · ${q.min} min</div></div>
+          <div class="meta">${q.available ? `${q.available} nearby` : '<span class="pill warn">few riders nearby</span>'} · ${q.min} min</div></div>
         <div><div class="price">${q.total === 0 ? '<span class="pos">FREE</span>' : rs(q.total)}</div>${q.split.promoCost ? `<div class="meta" style="text-align:right;text-decoration:line-through">${rs(q.gross)}</div>` : ''}
           ${cheapest && cheapest.estimate > q.total ? `<div class="save">Save ${rs(cheapest.estimate - q.total)} vs ${esc(cheapest.name)}</div>` : ''}</div>
         ${disc ? `<div class="meta pos" style="grid-column:1/-1">${disc}</div>` : ''}
@@ -163,14 +163,14 @@
   };
 
   const STATUS = {
-    scheduled: ['Scheduled', 'We will find a driver before pickup time.'],
-    searching: ['Finding your driver…', 'Offering your trip to the nearest drivers.'],
-    accepted: ['Driver on the way', 'Share the PIN only when you meet the driver.'],
-    arrived: ['Driver has arrived', 'Free waiting time has started. Tell the driver your PIN.'],
+    scheduled: ['Scheduled', 'We will find a rider before pickup time.'],
+    searching: ['Finding your rider…', 'Offering your trip to the nearest riders.'],
+    accepted: ['Your rider is on the way', 'Share the PIN only when you meet your rider.'],
+    arrived: ['Your rider has arrived', 'Free waiting time has started. Tell your rider the PIN.'],
     in_progress: ['On the way', 'Share your trip with family.'],
     completed: ['Completed', 'Thank you for choosing MyRide.'],
     cancelled: ['Cancelled', ''],
-    no_driver: ['No driver available', 'Sorry — try again or choose another vehicle.'],
+    no_driver: ['No rider available', 'Sorry — try again or choose another vehicle.'],
   };
 
   function showTrip(t) {
@@ -229,7 +229,7 @@
       <div class="kv total"><span>Total (incl. 5% VAT)</span><span>${rs(t.fare)}</span></div>
       <div class="muted">Your driver earns ${rs(t.quote.split.driver)} — discounts are paid by MyRide, not the driver.</div></div>
       ${t.payment.method !== 'cash' && t.payment.status !== 'paid' && t.fare > 0 ? `<button class="btn accent" id="payBtn">Pay ${rs(t.fare)} with ${t.payment.method === 'esewa' ? 'eSewa' : 'Khalti'}</button>` : ''}
-      <div class="card"><div class="muted">${rated ? 'You rated' : 'Rate your driver'}</div><div class="stars">${[1, 2, 3, 4, 5].map((v) => `<button data-v="${v}" class="${rated >= v ? 'on' : ''}" ${rated ? 'disabled' : ''}>★</button>`).join('')}</div></div>`;
+      <div class="card"><div class="muted">${rated ? 'You rated' : 'Rate your rider'}</div><div class="stars">${[1, 2, 3, 4, 5].map((v) => `<button data-v="${v}" class="${rated >= v ? 'on' : ''}" ${rated ? 'disabled' : ''}>★</button>`).join('')}</div></div>`;
   }
 
   function submitProvider(r) {
@@ -295,7 +295,7 @@
           <li>${Math.round(b.rideDiscountPct * 100)}% off every ride, parcel and logistics job (up to ${rs(b.maxDiscountPerTrip)} per trip)</li>
           <li>${b.freeCancellationsPerMonth} free cancellations each month</li>
           <li>Rs 0 cash-on-delivery handling fee</li>
-          <li>Priority matching — wider driver search when it's busy</li>
+          <li>Priority matching — wider rider search when it's busy</li>
         </ul>
         ${m.active ? `${m.autoRenew ? '<button class="btn ghost small" id="mCancel">Turn off renewal</button>' : '<span class="muted">Renewal off</span>'}` : `
         <div class="row">

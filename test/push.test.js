@@ -19,7 +19,7 @@ function setup(reply = { data: [{ status: 'ok' }] }) {
 }
 
 test('notifications map to the right portal and screen', () => {
-  assert.deepEqual(notificationFor({ type: 'trip', role: 'rider', trip: trip('arrived') }), { portal: 'rider', title: 'Your driver has arrived', body: 'Meet at Lakeside. Your PIN is 4321', url: '/rider' });
+  assert.deepEqual(notificationFor({ type: 'trip', role: 'rider', trip: trip('arrived') }), { portal: 'rider', title: 'Your rider has arrived', body: 'Meet at Lakeside. Your PIN is 4321', url: '/rider' });
   assert.equal(notificationFor({ type: 'offer', trip: { ...trip('searching'), pickupKm: 1.2 } }).url, '/driver');
   assert.equal(notificationFor({ type: 'face_check', status: 'required' }).url, '/driver/selfie');
   assert.equal(notificationFor({ type: 'trip', role: 'rider', trip: trip('in_progress') }), undefined); // rider is in the car
@@ -40,7 +40,7 @@ test('a status is pushed once even though trip events repeat on every GPS update
   push.register(user, TOKEN, 'rider');
   for (const s of ['accepted', 'accepted', 'accepted', 'arrived', 'in_progress', 'completed', 'completed']) push.deliver(user.id, { type: 'trip', role: 'rider', trip: trip(s) });
   await tick();
-  assert.deepEqual(sent.map((m) => m[0].title), ['Driver on the way', 'Your driver has arrived', 'You have arrived']);
+  assert.deepEqual(sent.map((m) => m[0].title), ['Your rider is on the way', 'Your rider has arrived', 'You have arrived']);
   assert.equal(sent[0][0].to, TOKEN);
   assert.equal(sent[0][0].channelId, 'trips');
 });

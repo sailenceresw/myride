@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, Share, Text } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { BackHeader, Button, Card, Pill, Row, Txt } from '@/components/ui';
+import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Avatar, BackHeader, Button, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
 import { api, apiUrlFor, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { useTheme } from '@/lib/theme';
+import { shadow, useTheme } from '@/lib/theme';
 
 type Plans = Record<'plus_monthly' | 'plus_yearly', { label: string; price: number }>;
+const PERKS = ['5% off every trip (up to Rs 25)', '3 free cancellations a month', 'Priority matching at busy times', 'No cash-on-delivery fee'];
 
 export default function Account() {
   const t = useTheme();
@@ -39,39 +39,83 @@ export default function Account() {
   const invite = () => Share.share({ message: `Ride free on MyRide in Pokhara! Use my code ${profile.referral.code} — your first ride is free (up to Rs 100). ${apiUrlFor(`/?ref=${profile.referral.code}`)}` });
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 6 }}>
-        <BackHeader title={profile.name} kind="h1" />
-        <Txt kind="muted">+977 {profile.phone}</Txt>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+        <Hero style={{ paddingBottom: 48 }}>
+          <BackHeader title="Account" light />
+          <Row style={{ gap: 14, marginTop: 10 }}>
+            <View style={styles.ring}><Avatar name={profile.name} size={60} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.name} numberOfLines={1}>{profile.name}</Text>
+              <Text style={styles.phone}>+977 {profile.phone}</Text>
+            </View>
+            {m.active && <Pill icon="star" text="PLUS" color={t.accent} />}
+          </Row>
+        </Hero>
 
-        <Card style={{ borderColor: m.active ? t.accent : t.line, borderWidth: 2 }}>
-          <Row style={{ justifyContent: 'space-between' }}><Txt kind="h2">{m.active ? '⭐ MyRide Plus' : 'MyRide Plus'}</Txt>{m.active && <Pill text="ACTIVE" color={t.accent} />}</Row>
-          <Txt kind="muted">5% off every ride, parcel & logistics job (max Rs 25) · 3 free cancellations a month · priority matching · no COD fee</Txt>
-          {m.active ? (
-            <Txt kind="small" style={{ marginTop: 6 }}>{m.label} · until {m.expiresAt ? new Date(m.expiresAt).toLocaleDateString() : ''}</Txt>
-          ) : plans && (
-            <>
-              <Button title={`${rs(plans.plus_monthly.price, 2)} / month`} onPress={() => subscribe('plus_monthly')} loading={busy === 'plus_monthly'} style={{ marginTop: 10 }} />
-              <Button title={`${rs(plans.plus_yearly.price, 2)} / year — save 17%`} kind="accent" onPress={() => subscribe('plus_yearly')} loading={busy === 'plus_yearly'} style={{ marginTop: 8 }} />
-              <Button title="Try free for 7 days" kind="ghost" onPress={trial} loading={busy === 'trial'} style={{ marginTop: 8 }} />
-            </>
-          )}
-        </Card>
+        <View style={{ paddingHorizontal: 16, marginTop: -30, gap: 6 }}>
+          <Card raised style={[{ borderColor: t.accent, borderWidth: 1.5 }, shadow(8)]}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Row><Icon name="star" size={20} color={t.accent} /><Txt kind="h2">MyRide Plus</Txt></Row>
+              {m.active && <Pill text="ACTIVE" color={t.ok} tint={t.okSoft} />}
+            </Row>
+            <View style={{ gap: 6, marginVertical: 10 }}>
+              {PERKS.map((p) => <Row key={p}><Icon name="checkmark-circle" size={18} color={t.ok} /><Txt kind="muted">{p}</Txt></Row>)}
+            </View>
+            {m.active ? (
+              <Txt kind="small">{m.label} · renews {m.expiresAt ? new Date(m.expiresAt).toLocaleDateString() : ''}</Txt>
+            ) : plans && (
+              <View style={{ gap: 8 }}>
+                <Row>
+                  <PlanButton title="Monthly" price={rs(plans.plus_monthly.price, 2)} onPress={() => subscribe('plus_monthly')} busy={busy === 'plus_monthly'} />
+                  <PlanButton title="Yearly" price={rs(plans.plus_yearly.price, 2)} badge="Save 17%" onPress={() => subscribe('plus_yearly')} busy={busy === 'plus_yearly'} best />
+                </Row>
+                <Button title="Try free for 7 days" kind="ghost" onPress={trial} loading={busy === 'trial'} />
+              </View>
+            )}
+          </Card>
 
-        <Card><Row style={{ justifyContent: 'space-between' }}><Txt kind="h2">Credits</Txt><Txt kind="price">{rs(profile.credits)}</Txt></Row><Txt kind="small">Applied automatically when you book.</Txt></Card>
+          <Card>
+            <ListRow icon="wallet" title="MyRide credits" subtitle="Applied automatically when you book" right={<Txt kind="price">{rs(profile.credits)}</Txt>} />
+          </Card>
 
-        <Card>
-          <Txt kind="h2">Invite friends, ride free</Txt>
-          <Txt kind="muted">They get their first ride free (up to Rs 100). You get Rs 50 when they finish it.</Txt>
-          <Text style={{ fontSize: 26, fontWeight: '900', letterSpacing: 4, color: t.brand, textAlign: 'center', marginVertical: 8 }}>{profile.referral.code}</Text>
-          <Button title="Share invite" kind="ghost" onPress={invite} />
-          <Txt kind="small" style={{ marginTop: 4 }}>Earned {rs(profile.referral.earned)}</Txt>
-        </Card>
+          <Card>
+            <ListRow icon="gift" title="Invite friends, ride free" subtitle={`They ride free (up to Rs 100). You get Rs 50. Earned ${rs(profile.referral.earned)}`} />
+            <View style={[styles.code, { borderColor: t.brand, backgroundColor: t.brandSoft }]}>
+              <Text style={{ fontSize: 24, fontWeight: '900', letterSpacing: 5, color: t.brand }}>{profile.referral.code}</Text>
+            </View>
+            <Button title="Share invite" icon="share-social" kind="soft" onPress={invite} />
+          </Card>
 
-        <Card><Txt kind="h2">Drive with MyRide</Txt><Txt kind="muted">Get the MyRide Drive app — same mobile number, separate driver account. Weekly payouts to your bank.</Txt></Card>
+          <Card>
+            <ListRow icon="car-sport" title="Become a MyRide rider" subtitle="Earn with your motorcycle, car or van. Get the MyRide Drive app — weekly payouts to your bank." />
+            <ListRow icon="shield-checkmark" title="Safety" subtitle="SOS calls Nepal Police (100) and alerts MyRide ops. Share your trip live." />
+          </Card>
 
-        <Button title="Sign out" kind="ghost" onPress={signOut} style={{ marginTop: 8 }} />
+          <Button title="Sign out" icon="log-out-outline" kind="ghost" onPress={signOut} style={{ marginTop: 8 }} />
+        </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
+
+function PlanButton({ title, price, badge, onPress, busy, best }: { title: string; price: string; badge?: string; onPress: () => void; busy: boolean; best?: boolean }) {
+  const t = useTheme();
+  return (
+    <View style={{ flex: 1 }}>
+      <Card onPress={busy ? undefined : onPress} selected={best} style={{ alignItems: 'center', paddingVertical: 16 }}>
+        {badge && <View style={[styles.badge, { backgroundColor: t.accent }]}><Text style={{ fontSize: 10, fontWeight: '900', color: '#1d1405' }}>{badge}</Text></View>}
+        <Txt kind="label">{title}</Txt>
+        <Txt kind="price" style={{ marginTop: 4 }}>{busy ? '…' : price}</Txt>
+      </Card>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  ring: { padding: 3, borderRadius: 40, backgroundColor: '#ffffff33' },
+  name: { color: '#fff', fontSize: 22, fontWeight: '900' },
+  phone: { color: '#ffffffc0', fontSize: 14, marginTop: 2 },
+  code: { borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 14, alignItems: 'center', paddingVertical: 12, marginVertical: 10 },
+  badge: { position: 'absolute', top: -9, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 },
+});
