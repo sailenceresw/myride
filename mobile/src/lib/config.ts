@@ -1,12 +1,12 @@
 import Constants from 'expo-constants';
 import { Linking, Platform } from 'react-native';
 
-export type Variant = 'rider' | 'driver';
+export type Variant = 'customer' | 'drive';
 const extra = (Constants.expoConfig?.extra ?? {}) as { variant?: Variant; apiUrl?: unknown };
 
-/** Which store app this build is: MyRide (rider) or MyRide Drive (driver). */
-export const VARIANT: Variant = (process.env.EXPO_PUBLIC_APP_VARIANT as Variant) || extra.variant || 'rider';
-export const IS_DRIVER = VARIANT === 'driver';
+/** Which store app this build is: MyRide (customers book trips) or MyRide Drive (riders drive and earn). */
+export const VARIANT: Variant = (process.env.EXPO_PUBLIC_APP_VARIANT as Variant) || extra.variant || 'customer';
+export const IS_DRIVE = VARIANT === 'drive';
 
 /**
  * MyRide API base URL, resolved once:

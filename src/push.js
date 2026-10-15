@@ -17,11 +17,11 @@ const DRIVER = { cancelled: ['Trip cancelled', (t) => `${t.riderName} (customer)
 
 /** Map one bus message to a notification for its recipient, or null if it isn't worth a push. */
 function notificationFor(msg) {
-  if (msg.type === 'offer') return { portal: 'driver', title: 'New trip request', body: `${msg.trip.pickup.label} → ${msg.trip.drop.label} · ${msg.trip.pickupKm} km away`, url: '/driver' };
-  if (msg.type === 'face_check' && msg.status === 'required') return { portal: 'driver', title: 'Selfie check required', body: 'Take a quick selfie to keep receiving trips', url: '/driver/selfie' };
+  if (msg.type === 'offer') return { portal: 'driver', title: 'New trip request', body: `${msg.trip.pickup.label} → ${msg.trip.drop.label} · ${msg.trip.pickupKm} km away`, url: '/drive' };
+  if (msg.type === 'face_check' && msg.status === 'required') return { portal: 'driver', title: 'Selfie check required', body: 'Take a quick selfie to keep receiving trips', url: '/drive/selfie' };
   if (msg.type !== 'trip') return null;
   const n = (msg.role === 'driver' ? DRIVER : RIDER)[msg.trip.status];
-  return n && { portal: msg.role, title: n[0], body: n[1](msg.trip), url: msg.role === 'driver' ? '/driver' : '/rider' };
+  return n && { portal: msg.role, title: n[0], body: n[1](msg.trip), url: msg.role === 'driver' ? '/drive' : '/customer' };
 }
 
 function createPush({ store, fetchImpl = fetch, log = console.error }) {

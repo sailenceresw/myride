@@ -1,7 +1,7 @@
 import { API_URL } from './config';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public data: Record<string, unknown> = {}) { super(message); }
 }
 
 let token: string | null = null;
@@ -18,7 +18,7 @@ export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'D
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, json.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(res.status, json.error || `Request failed (${res.status})`, json);
   return json as T;
 }
 

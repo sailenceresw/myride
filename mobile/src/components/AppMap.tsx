@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
-import { StyleSheet, Text } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { Platform, StyleSheet, Text } from 'react-native';
+import type MapView from 'react-native-maps';
 import { WebView } from 'react-native-webview';
 import { POKHARA } from '@/lib/config';
 
@@ -24,9 +24,12 @@ const ll = ({ lat, lng }: Pt) => ({ latitude: lat, longitude: lng });
  *   failure" and an unauthorised Google map draws nothing at all, not even custom tiles. OSM's tile servers need a
  *   Referer (the WebView's baseUrl provides one) and are for light use only: production uses the native maps.
  */
-export const AppMap = process.env.EXPO_PUBLIC_HAS_MAPS_KEY ? NativeMap : WebMap;
+// react-native-maps is native-only: load it lazily so the web preview (expo start --web) still runs.
+const Maps: typeof import('react-native-maps') | null = Platform.OS === 'web' ? null : require('react-native-maps'); // eslint-disable-line @typescript-eslint/no-require-imports
+export const AppMap = process.env.EXPO_PUBLIC_HAS_MAPS_KEY && Maps ? NativeMap : WebMap;
 
 function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan, ref }: Props) {
+  const { default: Map, Marker, Polyline } = Maps!;
   const map = useRef<MapView>(null);
   useImperativeHandle(ref, () => ({
     // Apple Maps zooms by altitude, Google by zoom: send both.
@@ -34,7 +37,7 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
     fit: (points, pad) => map.current?.fitToCoordinates(points.map(ll), { edgePadding: { ...PAD, ...pad }, animated: true }),
   }), []);
   return (
-    <MapView
+    <Map
       ref={map}
       style={StyleSheet.absoluteFill}
       initialRegion={{ ...POKHARA, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
@@ -49,7 +52,7 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
       {markers.map((m) => m.emoji
         ? <Marker key={m.key} coordinate={ll(m.at)} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false} title={m.title}><Text style={{ fontSize: m.size ?? 24 }}>{m.emoji}</Text></Marker>
         : <Marker key={m.key} coordinate={ll(m.at)} pinColor={m.color} title={m.title} />)}
-    </MapView>
+    </Map>
   );
 }
 

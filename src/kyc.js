@@ -93,8 +93,11 @@ function validateApplication(app, now) {
   if (missing.length) errors.push(`Upload: ${missing.join(', ')}`);
 
   const f = app.face || {};
-  if (!Array.isArray(f.selfieDescriptor)) errors.push('Take a live selfie for face verification');
-  else {
+  if (!Array.isArray(f.selfieDescriptor)) {
+    // Native app applications send the selfie as a photo only: ops compares it with the ID photo, and the first
+    // live selfie check in MyRide Drive enrols the face (or FACE_PROVIDER=rekognition matches photos server-side).
+    checks.push({ check: 'selfie_vs_id_photo', ok: false, detail: 'Compare the selfie photo with the citizenship and licence photos' });
+  } else {
     const dist = faceDistance(f.selfieDescriptor, f.idDescriptor);
     checks.push({
       check: 'selfie_vs_id_photo', ok: dist <= KYC.docMatchThreshold,

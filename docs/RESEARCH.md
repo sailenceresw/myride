@@ -227,7 +227,7 @@ Once those are included, **the v1 plan never becomes profitable.** At month 12 i
 **Partner vs salaried fleet:**
 - **Partner (own vehicle)** is how Uber works: drivers are independent contractors who are paid weekly.
 - **MyRide Fleet (salaried)** means the company provides the vehicle and pays wages.
-- Both have **separate login portals.** Riders use `/`, drivers use **MyRide Drive** (`/driver.html`) and ops use `/admin.html`. One mobile number can be both a rider and a driver, but the sessions are separate. A rider token cannot call driver endpoints, and the reverse is also blocked.
+- Both are **separate apps with separate sessions.** Customers use **MyRide** and riders (the people who drive) use **MyRide Drive**; staff use the internal Ops console. A customer applies to become a rider inside MyRide, and once approved signs in to MyRide Drive with the same mobile number. A customer session cannot call rider endpoints (apart from the application itself), and a rider session cannot book trips.
 - A rider can apply to drive from their profile ("Drive with MyRide"), which opens the Drive portal.
 
 **KYC, modelled on Uber's onboarding with Nepali documents:**

@@ -8,6 +8,7 @@
     "expo-constants": "~57.0.21",
     "expo-device": "~57.0.2",
     "expo-haptics": "~57.0.3",
+    "expo-image-picker": "~57.0.20",
     "expo-linear-gradient": "~57.0.2",
     "expo-linking": "~57.0.12",
     "expo-location": "~57.0.21",
@@ -29,15 +30,15 @@
   },
   "scripts": {
     "start": "expo start",
-    "start:rider": "node scripts/start.js rider",
-    "start:driver": "node scripts/start.js driver",
+    "start:customer": "node scripts/start.js customer",
+    "start:drive": "node scripts/start.js drive",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "android:rider": "node scripts/start.js rider --android",
-    "android:driver": "node scripts/start.js driver --android"
+    "android:customer": "node scripts/start.js customer --android",
+    "android:drive": "node scripts/start.js drive --android"
   },
   "private": true,
   "devDependencies": {

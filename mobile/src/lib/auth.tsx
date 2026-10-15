@@ -7,7 +7,7 @@ import { VARIANT } from './config';
 import { registerPush, unregisterPush } from './push';
 
 // Each store app signs in to its own portal: MyRide → "rider", MyRide Drive → "driver" (separate sessions, like Uber).
-const PORTAL = VARIANT === 'driver' ? 'driver' : 'rider';
+const PORTAL = VARIANT === 'drive' ? 'driver' : 'rider'; // server portal names
 /** Same key the web portals use, so the in-app WebView (KYC wizard) shares the session. */
 export const TOKEN_KEY = `myride.token.${PORTAL}`;
 
@@ -22,6 +22,8 @@ export type Profile = {
   id: string; name: string; phone: string; credits: number; firstRideFree: boolean;
   referral: { code: string; earned: number };
   membership: { active: boolean; label: string; expiresAt: number | null };
+  driverApplication: { status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'resubmit' } | null; // rider application
+  isDriver: boolean; // approved MyRide rider
 };
 
 type AuthState = {

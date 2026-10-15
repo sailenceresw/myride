@@ -188,7 +188,7 @@ export default function RiderHome() {
       <AppMap ref={map} user={fix} padding={{ bottom: sheetH }} markers={markers} lines={routeCoords ? [{ coords: routeCoords, color: t.ink, width: 5 }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
-        <RoundButton icon="person" label="Account" onPress={() => router.push('/rider/account')} />
+        <RoundButton icon="person" label="Account" onPress={() => router.push('/customer/account')} />
         {!trip && !drop && (
           <View style={[styles.hello, shadow(5), { backgroundColor: t.card }]}>
             <Text style={{ color: t.muted, fontSize: 12 }}>{greeting()}</Text>
@@ -234,10 +234,11 @@ export default function RiderHome() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
                   {quick.map((p) => <Chip key={p.id} label={QUICK[p.id][0]} icon={QUICK[p.id][1]} onPress={() => choose({ lat: p.lat, lng: p.lng, label: p.name }, 'drop')} />)}
                 </ScrollView>
-                <Row style={{ marginTop: 12 }}>
+                <Pressable onPress={() => router.push('/customer/fares')} style={[styles.from, { marginTop: 4 }]}>
                   <Icon name="shield-checkmark" size={16} color={t.ok} />
                   <Txt kind="small" style={{ flex: 1 }}>Fixed fares under the legal maximum. No surge pricing, ever.</Txt>
-                </Row>
+                  <Text style={{ color: t.brand, fontWeight: '700', fontSize: 12 }}>See fares</Text>
+                </Pressable>
               </>
             ) : (
               <>
