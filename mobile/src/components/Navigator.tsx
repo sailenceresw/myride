@@ -115,8 +115,8 @@ export function Navigator({ destination, destinationLabel, simulate = false, veh
         padding={{ top: 150, bottom: 220 }}
         lines={[{ coords: remaining, color: '#1a73e8', width: 8 }]}
         markers={[
-          { key: 'dest', at: destination, color: t.accent, title: destinationLabel },
-          ...(marker ? [{ key: 'me', at: marker, emoji: vehicleIcon, size: 30 }] : []),
+          { key: 'dest', at: destination, kind: 'drop', label: destinationLabel },
+          ...(marker ? [{ key: 'me', at: marker, kind: 'vehicle' as const, emoji: vehicleIcon, size: 24 }] : []),
         ]}
       />
 

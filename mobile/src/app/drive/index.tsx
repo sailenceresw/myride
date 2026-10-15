@@ -202,7 +202,7 @@ export default function DriverHome() {
   const online = !!d?.online;
   return (
     <View style={{ flex: 1 }}>
-      <AppMap ref={map} user={fix} traffic padding={{ bottom: sheetH }} markers={trip ? [{ key: 'pickup', at: trip.pickup, color: t.brand, title: 'Pickup' }] : []} />
+      <AppMap ref={map} user={fix} traffic padding={{ bottom: sheetH }} markers={trip ? [{ key: 'pickup', at: trip.pickup, kind: 'pickup', label: `Pickup · ${trip.riderName}` }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
         <RoundButton icon="log-out-outline" label="Sign out" onPress={signOut} />
