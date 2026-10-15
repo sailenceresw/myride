@@ -141,9 +141,9 @@ export function Pulse({ size, color, children }: { size: number; color: string; 
 }
 
 /** Brand gradient header used by login, account and earnings. */
-export function Hero({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+export function Hero({ children, style, colors = GRADIENT }: { children: ReactNode; style?: StyleProp<ViewStyle>; colors?: [string, string] }) {
   const insets = useSafeAreaInsets();
-  return <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 28 }, style]}><StatusBar style="light" />{children}</LinearGradient>;
+  return <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 28 }, style]}><StatusBar style="light" />{children}</LinearGradient>;
 }
 
 /** Back button + title used by every pushed screen (`light` for use on a Hero). */

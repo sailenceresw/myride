@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { Linking, Platform } from 'react-native';
 
 export type Variant = 'customer' | 'drive';
@@ -19,7 +20,8 @@ function resolveApiUrl(): string {
   if (configured) return configured.replace(/\/$/, '');
   const host = Constants.expoConfig?.hostUri?.split(':')[0];
   if (host && host !== 'localhost' && host !== '127.0.0.1') return `http://${host}:3000`;
-  return Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+  // 10.0.2.2 is the PC as seen from the Android emulator; a USB phone uses `adb reverse tcp:3000 tcp:3000` + localhost.
+  return Platform.OS === 'android' && !Device.isDevice ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 }
 export const API_URL = resolveApiUrl();
 

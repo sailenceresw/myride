@@ -15,7 +15,8 @@ export type Theme = typeof light;
 export const useTheme = (): Theme => (useColorScheme() === 'dark' ? dark : light);
 
 /** Brand gradient: teal for MyRide, near-black for MyRide Drive (like Uber vs Uber Driver). */
-export const GRADIENT = (IS_DRIVE ? ['#1f2e2c', '#070b0b'] : ['#119a8a', '#065249']) as [string, string];
+export const RIDER_GRADIENT: [string, string] = ['#1f2e2c', '#070b0b']; // MyRide Drive colours, also used for the rider journey in MyRide
+export const GRADIENT: [string, string] = IS_DRIVE ? RIDER_GRADIENT : ['#119a8a', '#065249'];
 export const RADIUS = { sm: 10, md: 14, lg: 20, pill: 999 };
 export const shadow = (e = 6) => ({ shadowColor: '#0b1f1c', shadowOpacity: 0.14, shadowRadius: e * 1.6, shadowOffset: { width: 0, height: e / 2 }, elevation: e });
 
