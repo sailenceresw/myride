@@ -4,7 +4,12 @@
 
 MyRide offers motorcycle, car and EV rides, motorcycle parcels, and goods transport (mini-trucks, covered vans, 4×4 jeeps for hill wards, pickups and trucks, with intercity lanes to Kathmandu, Chitwan, Butwal and more). Every passenger fare is calculated to stay **under the Gandaki Province legal maximum** and the national draft cap, with **no surge pricing**, and below the public estimates for Pathao and Yango.
 
-The platform ships as a web stack and as native **iOS & Android** apps built from one codebase — **MyRide** for customers and **MyRide Drive** for riders (the people who drive and earn with MyRide), the way Uber ships Uber and Uber Driver.
+MyRide is **two mobile apps for iOS and Android**, built from one codebase, the way Uber ships Uber and Uber Driver:
+
+- **MyRide**: for customers. Book rides, parcels and logistics, and **apply to become a rider** right from sign-up or Account.
+- **MyRide Drive**: for approved riders (the people who drive and earn with MyRide). Go online, get trips, navigate and get paid weekly.
+
+A Node.js API powers both apps. MyRide staff use an internal Ops console for rider approvals, payouts and monitoring.
 
 > Market research, ward analysis, pricing, unit economics, KYC and payroll design are documented in **[docs/RESEARCH.md](docs/RESEARCH.md)**.
 
@@ -34,23 +39,26 @@ The platform ships as a web stack and as native **iOS & Android** apps built fro
   <img src="docs/screenshots/app-icon-drive.png" width="72" alt="MyRide Drive app icon">
 </p>
 
-### Web portals
+### Staff console (internal, MyRide Ops)
 
-| Customer web app — booking from Lekhnath | Fare chart vs legal limits and competitors |
+| KYC review with document and face-match checks | Live fleet and demand by ward |
 |---|---|
-| ![Customer booking a motorcycle from Talchowk, Lekhnath to Lakeside with the first ride free](docs/screenshots/web-rider-booking.png) | ![Fare chart comparing MyRide with the Gandaki maximum, national draft cap, Pathao, Yango and taxis](docs/screenshots/web-fare-chart.png) |
-| **MyRide Drive — rider application (KYC)** | **Ops — KYC review with document and face-match checks** |
-| ![Seven-step rider application, licence and vehicle step](docs/screenshots/web-drive-application.png) | ![Ops console reviewing a rider application with bank-name, face-match and liveness checks](docs/screenshots/web-ops-kyc-review.png) |
-| **Ops — live fleet and demand by ward** | **Ops — unit economics and 24-month projection** |
-| ![Live fleet map with ward boundaries and compliance panel](docs/screenshots/web-ops-live-wards.png) | ![v1 to v2 EBITDA bridge and 24-month cash projection](docs/screenshots/web-ops-economics.png) |
+| ![Ops console reviewing a rider application with bank-name, face-match and liveness checks](docs/screenshots/web-ops-kyc-review.png) | ![Live fleet map with ward boundaries and compliance panel](docs/screenshots/web-ops-live-wards.png) |
 
 ---
+
+## How it works
+
+1. A customer installs **MyRide**, signs in with a +977 mobile number and books trips.
+2. To earn, they tap **Want to earn with MyRide? Apply to become a rider** on the sign-in screen, or **Become a MyRide rider** in Account. Then they fill in the native application: ride type and vehicle, personal details, licence, vehicle, bank, and camera photos of each document.
+3. MyRide Ops reviews the application. When approved, the rider gets an SMS.
+4. The rider installs **MyRide Drive**, signs in with the same number, takes a live selfie (this enrols their face for random checks) and taps **GO**.
 
 ## Features
 
 ### Customers — `MyRide`
 - Map opens on your current location; **Where to?** search over landmarks, all 33 wards and intercity destinations.
-- **Ride · Parcel · Logistics** quotes in one sheet, showing the legal maximum and the saving versus the cheapest competitor.
+- **Ride · Parcel · Logistics** quotes in one sheet, showing the legal maximum and the saving versus the cheapest competitor, plus an in-app fare chart.
 - Live rider tracking (instant updates, push notifications when the app is closed), 4-digit trip PIN, share-trip link, SOS (Police 100, Tourist Police 1144, Ambulance 102), ratings.
 - **MyRide Plus** (Rs 199.99/month or Rs 1,999.99/year): 5% off every trip, free cancellations, priority matching.
 - First ride free (up to Rs 100), referrals (Rs 50 credit), promo codes, business PAN on receipts.
@@ -60,10 +68,10 @@ The platform ships as a web stack and as native **iOS & Android** apps built fro
 - Riders are partners (own vehicle) or salaried **MyRide Fleet** staff.
 - Uber-style **turn-by-turn navigation**: maneuver banner, tilted camera following heading, voice prompts, automatic re-routing.
 - Offer cards with countdown, exact earnings and long-pickup bonus; PIN, delivery-code and cash-on-delivery flows.
-- **KYC** (citizenship, licence category vs vehicle, police report, bank account) and Uber-style **random selfie checks**.
+- Native **rider application** (citizenship, licence category vs vehicle, police report, bluebook, insurance, bank account), also available inside MyRide Drive, plus Uber-style **random selfie checks**.
 - **Heading home** filter (2× per day), 12-hour daily limit, weekly payouts to the rider's bank (with SSF/overtime for fleet staff).
 
-### Operations — `MyRide Ops`
+### Operations — `MyRide Ops` (staff only)
 - KYC review queue, fleet vehicles, weekly payout batches (NCHL CorporatePay CSV), promo codes, SMS log.
 - Live fleet map shaded by ward demand; Gandaki compliance panel; unit economics and ROI projection.
 
@@ -81,7 +89,7 @@ The platform ships as a web stack and as native **iOS & Android** apps built fro
             │  Expo · React Native │       │  turn-by-turn nav     │
             └──────────┬───────────┘       └──────────┬───────────┘
                        │  REST (JSON)                 │
- Web: rider · Drive · Ops · fare chart · live tracker │
+ Ops console (staff) · trip-share link · invite page │
                        ▼                              ▼
             ┌─────────────────────────────────────────────────────┐
             │ Node.js / Express API  (src/app.js, src/service.js) │
@@ -97,29 +105,22 @@ The platform ships as a web stack and as native **iOS & Android** apps built fro
 | API | Node.js 24, Express, Server-Sent Events, JSON store (swap for PostgreSQL/PostGIS) |
 | Maps & routing | OpenStreetMap, OSRM, official OSM ward polygons for Pokhara |
 | Mobile | Expo SDK 57, React Native 0.86, Expo Router, TypeScript (strict), react-native-maps |
-| Web | Vanilla JS + Leaflet; face-api.js for liveness and face matching |
+| Staff console | Vanilla JS + Leaflet (Ops), plus the in-app selfie camera (face-api.js) and the trip-share page |
 | Messaging | Sparrow SMS / Aakash SMS with failover |
 
 ---
 
 ## Getting started
 
-### Server and web apps
+### API server
 
 ```bash
 npm install
 npm run dev     # demo mode: 28 simulated riders across Pokhara accept and drive trips
-npm test        # 98 tests
+npm test
 ```
 
-| Portal | URL |
-|---|---|
-| Customer web app | http://localhost:3000/ |
-| MyRide Drive | http://localhost:3000/driver.html |
-| MyRide Ops | http://localhost:3000/admin.html (dev admin `9800000000`) |
-| Fare chart | http://localhost:3000/fares.html |
-
-Without an SMS gateway configured, login codes are shown on screen (development only).
+The server also serves what the apps link to: the **Ops console** for staff (http://localhost:3000/admin.html, dev admin `9800000000`), the **trip-share page** customers send to family, and a small page for invite and payment-return links. Without an SMS gateway configured, login codes are shown in the app (development only).
 
 ### Mobile apps
 
@@ -128,8 +129,8 @@ Requires **Node ≥ 20.19.4** (Expo SDK 57).
 ```bash
 cd mobile
 npm install
-npm run start:rider     # MyRide       — scan the QR code with Expo Go, or press "a" for Android
-npm run start:driver    # MyRide Drive
+npm run start:customer  # MyRide (customer app) — scan the QR code with Expo Go, or press "a" for Android
+npm run start:drive     # MyRide Drive (rider app)
 npm test                # navigation engine tests
 npm run typecheck && npm run lint
 ```
@@ -138,7 +139,7 @@ The apps find the API automatically: same machine as the Expo dev server for pho
 
 Field-test navigation on the Android emulator by replaying a real road route through its GPS (noise, speed and a wrong turn to trigger rerouting): accept a trip in MyRide Drive, then run `node tools/gps-replay.js --from lakeside --to mahendrapul --kmh 30 --detour`.
 
-Store builds use EAS profiles (`rider`, `driver`, and `*-preview` APKs): `npx eas-cli@latest build --profile driver --platform android`.
+Store builds use EAS profiles (`customer`, `drive`, and `*-preview` APKs): `npx eas-cli@latest build --profile drive --platform android`.
 
 ---
 
@@ -168,8 +169,8 @@ Store builds use EAS profiles (`rider`, `driver`, and `*-preview` APKs): `npx ea
 
 ```
 src/            API: config, pricing, dispatch, rewards, KYC, payroll, SMS, economics, geo, app
-public/         Web apps: rider, MyRide Drive, Ops, fare chart, live tracker, selfie check
-mobile/         Expo app → MyRide + MyRide Drive (src/app = screens, src/lib = API, auth, navigation engine)
+public/         Ops console (staff), trip-share page, in-app selfie camera, invite/payment landing page
+mobile/         Expo app → MyRide (src/app/customer) + MyRide Drive (src/app/drive); src/lib = API, auth, navigation engine
 data/           Pokhara landmarks, OSRM distance matrix, 33 ward polygons, city boundary
 tools/          Scripts that regenerate the geographic data
 docs/           Research report and screenshots

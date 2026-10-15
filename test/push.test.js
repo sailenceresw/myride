@@ -19,9 +19,9 @@ function setup(reply = { data: [{ status: 'ok' }] }) {
 }
 
 test('notifications map to the right portal and screen', () => {
-  assert.deepEqual(notificationFor({ type: 'trip', role: 'rider', trip: trip('arrived') }), { portal: 'rider', title: 'Your rider has arrived', body: 'Meet at Lakeside. Your PIN is 4321', url: '/rider' });
-  assert.equal(notificationFor({ type: 'offer', trip: { ...trip('searching'), pickupKm: 1.2 } }).url, '/driver');
-  assert.equal(notificationFor({ type: 'face_check', status: 'required' }).url, '/driver/selfie');
+  assert.deepEqual(notificationFor({ type: 'trip', role: 'rider', trip: trip('arrived') }), { portal: 'rider', title: 'Your rider has arrived', body: 'Meet at Lakeside. Your PIN is 4321', url: '/customer' });
+  assert.equal(notificationFor({ type: 'offer', trip: { ...trip('searching'), pickupKm: 1.2 } }).url, '/drive');
+  assert.equal(notificationFor({ type: 'face_check', status: 'required' }).url, '/drive/selfie');
   assert.equal(notificationFor({ type: 'trip', role: 'rider', trip: trip('in_progress') }), undefined); // rider is in the car
   assert.equal(notificationFor({ type: 'sos' }), null);
 });
