@@ -88,10 +88,10 @@ export const Pill = ({ text, color, tint, icon }: { text: string; color: string;
 );
 
 /** Selectable chip (service tabs, payment methods, quick places). */
-export function Chip({ label, icon, active, onPress }: { label: string; icon?: IconName; active?: boolean; onPress: () => void }) {
+export function Chip({ label, icon, active, onPress, onLongPress }: { label: string; icon?: IconName; active?: boolean; onPress: () => void; onLongPress?: () => void }) {
   const t = useTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.chip, { backgroundColor: active ? t.ink : t.chip }]}>
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} onLongPress={onLongPress} style={[styles.chip, { backgroundColor: active ? t.ink : t.chip }]}>
       {icon && <Icon name={icon} size={16} color={active ? t.card : t.ink} />}
       <Text style={{ color: active ? t.card : t.ink, fontWeight: '700', fontSize: 14 }}>{label}</Text>
     </Pressable>

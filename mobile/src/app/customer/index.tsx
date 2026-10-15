@@ -12,6 +12,7 @@ import { RADIUS, shadow, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
 import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
+import { useSavedPlaces, type SavedKey } from '@/lib/useSavedPlaces';
 
 type Kind = 'ride' | 'delivery' | 'logistics';
 type Place = { id: string; name: string; lat: number; lng: number; category?: string };
@@ -30,6 +31,9 @@ const STATUS: Record<string, string> = {
   completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No riders available right now', scheduled: 'Scheduled',
 };
 const STEP_OF: Record<string, number> = { searching: 0, accepted: 1, arrived: 2, in_progress: 3 };
+const SAVED: Record<SavedKey, [string, IconName]> = { home: ['Home', 'home'], work: ['Work', 'briefcase'] };
+const SEARCH_TITLE = { pickup: 'Pickup point', drop: 'Where to?', home: 'Set your Home', work: 'Set your Work' };
+const short = (s?: string) => (s ?? 'Drop').replace(/ \(.*\)$/, '').slice(0, 24); // "Talchowk (Lekhnath)" → "Talchowk"
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
 export default function RiderHome() {
@@ -42,7 +46,11 @@ export default function RiderHome() {
   const [kind, setKind] = useState<Kind>('ride');
   const [pickupChoice, setPickup] = useState<Point | null>(null);
   const [drop, setDrop] = useState<Point | null>(null);
-  const [searching, setSearching] = useState<null | 'pickup' | 'drop'>(null);
+  const [searching, setSearching] = useState<null | 'pickup' | 'drop' | SavedKey>(null);
+  const { places: saved, save } = useSavedPlaces();
+  const [promo, setPromo] = useState(''); // typed code
+  const [promoApplied, setPromoApplied] = useState<string | null>(null);
+  const [promoOpen, setPromoOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [places, setPlaces] = useState<Place[]>([]);
   const [quote, setQuote] = useState<QuoteResp | null>(null);
@@ -87,16 +95,16 @@ export default function RiderHome() {
 
   usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${pickup!.lat}&lng=${pickup!.lng}`)), 8000, !trip && !!pickup);
 
-  const getQuote = useCallback(async (p: Point, d: Point, k: Kind) => {
+  const getQuote = useCallback(async (p: Point, d: Point, k: Kind, promoCode: string | null = promoApplied) => {
     setErr(''); setBusy(true);
     try {
-      const r = await api<QuoteResp>('POST', '/api/quote', { pickup: p, drop: d, kind: k, parcel: k === 'ride' ? undefined : { weightKg: +weight || 1 } });
+      const r = await api<QuoteResp>('POST', '/api/quote', { pickup: p, drop: d, kind: k, promoCode: promoCode ?? undefined, parcel: k === 'ride' ? undefined : { weightKg: +weight || 1 } });
       setQuote(r);
       setSel(r.recommend ?? r.quotes.find((q) => !q.unavailable)?.service ?? null);
-      if (r.promoError) setErr(r.promoError);
+      if (r.promoError) { setErr(r.promoError); setPromoApplied(null); }
     } catch (e) { setErr((e as Error).message); setQuote(null); }
     setBusy(false);
-  }, [weight]);
+  }, [weight, promoApplied]);
 
   const geometry = trip?.route.geometry ?? quote?.route.geometry;
   const routeCoords = useMemo(() => geometry?.map(([lat, lng]) => ({ lat, lng })), [geometry]);
@@ -114,6 +122,7 @@ export default function RiderHome() {
   const quick = useMemo(() => places.filter((p) => p.id in QUICK), [places]);
 
   function choose(p: Point | null, field = searching) { // null = back to current location
+    if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: SAVED[field][0] }); setSearching(null); setQuery(''); return; }
     const nextPickup = field === 'pickup' ? p ?? here : pickup;
     const nextDrop = field === 'drop' ? p : drop;
     if (field === 'pickup') setPickup(p); else setDrop(p);
@@ -132,7 +141,7 @@ export default function RiderHome() {
     setErr(''); setBusy(true);
     try {
       const goods = kind === 'ride' ? {} : { parcel: { weightKg: +weight || 1 }, recipient: receiver };
-      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, ...goods }));
+      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, ...goods }));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       setQuote(null);
     } catch (e) { setErr((e as Error).message); }
@@ -144,15 +153,16 @@ export default function RiderHome() {
   };
   const rate = async (stars: number) => { await api('POST', `/api/trips/${trip!.id}/rate`, { stars }).catch(() => {}); setTrip({ ...trip!, riderRating: { stars } }); };
   const sos = () => { api('POST', `/api/trips/${trip!.id}/sos`, { loc: fix }).catch(() => {}); call(POLICE); };
-  const reset = () => { setTrip(null); setDrop(null); setQuote(null); refresh(); };
+  const reset = () => { setTrip(null); setDrop(null); setQuote(null); setPromoApplied(null); refresh(); };
+  const applyPromo = () => { const code = promo.trim().toUpperCase(); if (!code || !pickup || !drop) return; setPromoApplied(code); setPromoOpen(false); getQuote(pickup, drop, kind, code); };
 
   const selected = quote?.quotes.find((q) => q.service === sel);
   const pk = trip?.pickup ?? pickup, dp = trip?.drop ?? drop;
   const markers: MapMarker[] = [
-    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, emoji: vehicleEmoji(c.type), size: 22 }))),
-    ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, color: t.brand, title: 'Pickup' }] : []),
-    ...(dp ? [{ key: 'drop', at: dp, color: t.accent, title: 'Drop' }] : []),
-    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 30 }] : []),
+    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, emoji: vehicleEmoji(c.type), size: 20 }))),
+    ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : 'Pickup' }] : []),
+    ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: [short(dp.label), quote && !trip ? `${Math.round(quote.route.min)} min` : ''].filter(Boolean).join(' · ') }] : []),
+    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
   ];
   const input = [styles.small, { borderColor: t.line, color: t.ink, backgroundColor: t.bg }];
 
@@ -161,13 +171,15 @@ export default function RiderHome() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
         <View style={{ paddingHorizontal: 16, gap: 10 }}>
-          <BackHeader title={searching === 'pickup' ? 'Pickup point' : 'Where to?'} />
+          <BackHeader title={SEARCH_TITLE[searching]} />
           <View style={[styles.search, shadow(3), { backgroundColor: t.card }]}>
             <Icon name="search" size={20} color={t.muted} />
             <TextInput autoFocus value={query} onChangeText={setQuery} placeholder="Landmark, ward (e.g. Ward 27) or city" placeholderTextColor={t.muted} style={{ flex: 1, fontSize: 16, color: t.ink, paddingVertical: 14 }} />
             {!!query && <Pressable onPress={() => setQuery('')} hitSlop={10}><Icon name="close-circle" size={20} color={t.muted} /></Pressable>}
           </View>
           {searching === 'pickup' && here && <PlaceRow icon="locate" title="Use current location" subtitle="GPS" onPress={() => choose(null)} highlight />}
+          {(searching === 'home' || searching === 'work') && here && <PlaceRow icon="locate" title="Use my current location" subtitle={`Save as ${SAVED[searching][0]}`} onPress={() => choose(here)} highlight />}
+          {searching === 'drop' && (Object.keys(SAVED) as SavedKey[]).map((k) => saved[k] && <PlaceRow key={k} icon={SAVED[k][1]} title={SAVED[k][0]} subtitle="Saved place" onPress={() => choose(saved[k]!)} highlight />)}
         </View>
         <FlatList
           data={results}
@@ -198,6 +210,7 @@ export default function RiderHome() {
         <View style={{ flex: 1 }} />
         {profile?.membership.active && <Pill icon="star" text="PLUS" color={t.accent} />}
         {profile?.firstRideFree && !trip && <Pill icon="gift" text="1st ride free" color={t.ok} />}
+        {!trip && <RoundButton icon="receipt-outline" label="Your trips" onPress={() => router.push('/customer/activity')} />}
       </View>
 
       {!trip && fix && <RoundButton icon="locate" label="Recenter on my location" onPress={() => map.current?.flyTo(fix, { zoom: 16 })} style={{ position: 'absolute', right: 14, bottom: sheetH + 14 }} />}
@@ -206,7 +219,16 @@ export default function RiderHome() {
         onHeight={setSheetH}
         footer={!trip && selected ? (
           <>
-            <Row>{(Object.keys(PAYMENTS) as (keyof typeof PAYMENTS)[]).map((p) => <Chip key={p} label={PAYMENTS[p][0]} icon={PAYMENTS[p][1]} active={payment === p} onPress={() => setPayment(p)} />)}</Row>
+            {promoOpen && (
+              <Row>
+                <TextInput autoFocus value={promo} onChangeText={(v) => setPromo(v.toUpperCase())} placeholder="Promo code, e.g. POKHARA20" placeholderTextColor={t.muted} autoCapitalize="characters" onSubmitEditing={applyPromo} style={[...input, { flex: 1 }]} />
+                <Button title="Apply" kind="soft" onPress={applyPromo} style={{ minHeight: 44, paddingVertical: 10 }} />
+              </Row>
+            )}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {(Object.keys(PAYMENTS) as (keyof typeof PAYMENTS)[]).map((p) => <Chip key={p} label={PAYMENTS[p][0]} icon={PAYMENTS[p][1]} active={payment === p} onPress={() => setPayment(p)} />)}
+              <Chip label={promoApplied ?? 'Promo'} icon={promoApplied ? 'checkmark-circle' : 'pricetag-outline'} active={!!promoApplied} onPress={() => setPromoOpen(!promoOpen)} />
+            </ScrollView>
             <Button title={`Book ${selected.label.replace('MyRide ', '')} · ${selected.total === 0 ? 'FREE' : rs(selected.total)}`} onPress={book} loading={busy} kind="dark" />
           </>
         ) : undefined}
@@ -232,6 +254,7 @@ export default function RiderHome() {
                   <Icon name="pencil" size={15} color={t.muted} />
                 </Pressable>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+                  {(Object.keys(SAVED) as SavedKey[]).map((k) => <Chip key={k} label={saved[k] ? SAVED[k][0] : `Set ${SAVED[k][0]}`} icon={SAVED[k][1]} active={false} onPress={() => (saved[k] ? choose(saved[k]!, 'drop') : setSearching(k))} onLongPress={() => setSearching(k)} />)}
                   {quick.map((p) => <Chip key={p.id} label={QUICK[p.id][0]} icon={QUICK[p.id][1]} onPress={() => choose({ lat: p.lat, lng: p.lng, label: p.name }, 'drop')} />)}
                 </ScrollView>
                 <Pressable onPress={() => router.push('/customer/fares')} style={[styles.from, { marginTop: 4 }]}>
