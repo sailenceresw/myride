@@ -94,7 +94,7 @@ export default function Account() {
           </Card>
 
           <Card>
-            <ListRow icon="car-sport" title={profile.isDriver ? "You're a MyRide rider" : 'Become a MyRide rider'} subtitle={RIDER_STATUS[profile.isDriver ? 'approved' : profile.driverApplication?.status ?? 'none']} onPress={() => router.push('/customer/apply')} />
+            <ListRow icon="car-sport" title={profile.isDriver ? "You're a MyRide rider" : 'Become a MyRide rider'} subtitle={RIDER_STATUS[profile.isDriver ? 'approved' : profile.driverApplication?.status ?? 'none']} onPress={() => router.push(profile.driverApplication || profile.isDriver ? '/customer/apply' : '/become-rider')} />
             <ListRow icon="pricetags-outline" title="Fare chart" subtitle="MyRide fares vs the legal maximum, Pathao and Yango" onPress={() => router.push('/customer/fares')} />
             <ListRow icon="shield-checkmark" title="Safety" subtitle="SOS calls Nepal Police (100) and alerts MyRide ops. Share your trip live." />
           </Card>
