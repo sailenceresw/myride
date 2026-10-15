@@ -584,7 +584,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     user.name = app.personal.fullName;
     const d = createDriverRecord(user, {
       driverType: app.driverType, vehicle, gender: app.personal.gender, licence: app.licence, bank: app.bank,
-      faceDescriptor: app.face.selfieDescriptor, faceRef: app.documents.selfie, fleetVehicleId: app.driverType === 'employee' ? fleetVehicleId : null, monthlyWage, homeAddress: app.personal.address,
+      faceDescriptor: app.face?.selfieDescriptor, faceRef: app.documents.selfie, fleetVehicleId: app.driverType === 'employee' ? fleetVehicleId : null, monthlyWage, homeAddress: app.personal.address,
     });
     if (app.driverType === 'employee') store.get('fleet', fleetVehicleId).assignedDriverId = d.id;
     app.status = 'approved';
@@ -650,6 +650,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const saved = photo && files ? files.save(user.id, 'selfie_check', photo) : null;
     const bytes = (id) => (id && files?.read(id)?.buf) || null;
     const match = await face.verify({ descriptor, enrolled: d.faceDescriptor, history: d.faceCheck?.history, photo: bytes(saved?.id), reference: bytes(d.faceRef) });
+    if (match.enrolled) d.faceDescriptor = descriptor;
     const res = kyc.verifySelfie(d, match, now());
     if (d.suspended) {
       if (d.online) { accrueOnline(d); d.online = false; d.onlineSince = null; }

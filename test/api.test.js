@@ -76,7 +76,8 @@ test('auth: invalid numbers, wrong OTP, non-admin cannot open the ops portal', a
 test('portals are separate: rider token cannot use Drive endpoints, driver token cannot book or open ops', async () => {
   const r1 = await api('GET', '/api/driver/dashboard', null, rider.token);
   assert.equal(r1.status, 403);
-  assert.match(r1.body.error, /Drive portal/);
+  assert.match(r1.body.error, /MyRide Drive app/);
+  assert.equal((await api('GET', '/api/driver/application', null, rider.token)).status, 200, 'customers can apply to become a rider');
   assert.equal((await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside') }, bikeDrv.token)).status, 403);
   assert.equal((await api('GET', '/api/admin/stats', null, bikeDrv.token)).status, 403);
   assert.equal((await api('GET', '/api/admin/stats', null, rider.token)).status, 403);

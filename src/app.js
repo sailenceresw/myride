@@ -56,8 +56,8 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   const guard = (portal) => (req, res, next) => {
     const s = svc.session(tokenOf(req));
     if (!s) return res.status(401).json({ error: 'Please log in' });
-    if (portal && s.portal !== portal) {
-      const where = { rider: 'the MyRide app', driver: 'the MyRide Drive portal', admin: 'the MyRide Ops console' }[portal];
+    if (portal && ![].concat(portal).includes(s.portal)) {
+      const where = { rider: 'the MyRide app', driver: 'the MyRide Drive app', admin: 'the MyRide Ops console' }[[].concat(portal)[0]];
       return res.status(403).json({ error: `Please sign in to ${where}`, portal: s.portal });
     }
     req.user = s.user;
@@ -67,6 +67,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   const anyAuth = guard(null);
   const rider = guard('rider');
   const driver = guard('driver');
+  const applicant = guard(['rider', 'driver']); // apply to become a rider from the customer app or MyRide Drive
   const admin = (req, res, next) => guard('admin')(req, res, () => (req.user.roles.includes('admin') ? next() : res.status(403).json({ error: 'Admins only' })));
 
   // ---------- public ----------
@@ -246,10 +247,10 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
 
   // ---------- MyRide Drive portal ----------
   app.get('/api/driver/dashboard', driver, (req, res) => res.json(svc.driverDashboard(req.user)));
-  app.get('/api/driver/application', driver, (req, res) => res.json(svc.getApplication(req.user)));
-  app.put('/api/driver/application', driver, wrap((req) => svc.saveApplication(req.user, req.body)));
-  app.post('/api/driver/application/documents', driver, wrap((req) => svc.uploadDocument(req.user, req.body.kind, req.body.data)));
-  app.post('/api/driver/application/submit', driver, wrap((req) => svc.submitApplication(req.user)));
+  app.get('/api/driver/application', applicant, (req, res) => res.json(svc.getApplication(req.user)));
+  app.put('/api/driver/application', applicant, wrap((req) => svc.saveApplication(req.user, req.body)));
+  app.post('/api/driver/application/documents', applicant, wrap((req) => svc.uploadDocument(req.user, req.body.kind, req.body.data)));
+  app.post('/api/driver/application/submit', applicant, wrap((req) => svc.submitApplication(req.user)));
   app.post('/api/driver/face-check', driver, wrap((req) => svc.submitSelfie(req.user, req.body)));
   app.post('/api/driver/online', driver, wrap((req) => { const d = svc.setOnline(req.user, req.body.online, req.body.loc); return svc.driverDashboard(req.user).driver || d; }));
   // Turn-by-turn navigation for the native driver app (and rider ETA previews).

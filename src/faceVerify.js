@@ -41,6 +41,8 @@ const PROVIDERS = {
       if (!Array.isArray(descriptor)) return { provider: 'local', passed: false, error: 'No face found — retake the selfie' };
       const fp = fingerprint(descriptor);
       if (history.some((h) => h.fp === fp)) return { provider: 'local', passed: false, fp, error: 'This selfie was already used — take a new one' };
+      // Applied from the app with photos only (ops matched them by eye): the first live check enrols the face.
+      if (!Array.isArray(enrolled)) return { provider: 'local', passed: true, enrolled: true, fp };
       const dist = faceDistance(descriptor, enrolled);
       return { provider: 'local', passed: dist <= KYC.faceMatchThreshold, distance: Number.isFinite(dist) ? +dist.toFixed(4) : null, fp };
     },

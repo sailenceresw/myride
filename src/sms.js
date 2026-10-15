@@ -83,7 +83,7 @@ async function sendSms(phone, text, opts = {}) {
 const templates = {
   otp: (code) => `<#> ${code} is your MyRide code. Valid 5 min. Never share it — MyRide staff will never ask.${process.env.ANDROID_SMS_HASH ? ` ${process.env.ANDROID_SMS_HASH}` : ''}`,
   deliveryCode: ({ code, sender, km }) => `MyRide: a delivery from ${String(sender).slice(0, 20)} is on its way (${km} km). Give the driver code ${code} only after you receive it.`,
-  kycApproved: (name) => `MyRide Drive: Congratulations ${String(name).split(' ')[0]}! Your account is approved. Open the app, take a quick selfie and go online.`,
+  kycApproved: (name) => `MyRide: Congratulations ${String(name).split(' ')[0]}! You are approved as a MyRide rider. Install MyRide Drive, sign in with this number and go online.`,
   kycAction: (status, reason) => `MyRide Drive: your application needs attention (${status}). ${String(reason || '').slice(0, 90)}`,
 };
 
