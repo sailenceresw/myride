@@ -17,7 +17,7 @@ A Node.js API powers both apps. MyRide staff use an internal Ops console for rid
 
 ## Screenshots
 
-### Mobile apps (Android, live demo fleet)
+### Mobile apps
 
 <table>
   <tr>
@@ -31,6 +31,12 @@ A Node.js API powers both apps. MyRide staff use an internal Ops console for rid
     <td align="center"><img src="docs/screenshots/mobile-otp.png" width="200" alt="Six-box SMS code entry with resend timer"><br><sub>SMS code with auto-fill</sub></td>
     <td align="center"><img src="docs/screenshots/mobile-account.png" width="200" alt="Account with MyRide Plus monthly and yearly plans and referral code"><br><sub>MyRide Plus and referrals</sub></td>
     <td align="center"><img src="docs/screenshots/mobile-drive-login.png" width="200" alt="MyRide Drive sign-in in the dark Drive theme"><br><sub>MyRide Drive for riders</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/mobile-signup-apply-rider.png" width="200" alt="Customer sign-up with the Want to earn with MyRide? apply to become a rider option"><br><sub>Sign up and apply to become a rider</sub></td>
+    <td align="center"><img src="docs/screenshots/mobile-apply-ride.png" width="200" alt="Rider application: own vehicle or MyRide fleet, and vehicle type"><br><sub>Rider application: ride type and vehicle</sub></td>
+    <td align="center"><img src="docs/screenshots/mobile-apply-photos.png" width="200" alt="Rider application: camera photos of citizenship, licence, police report, selfie, bluebook and insurance"><br><sub>Document photos with the camera</sub></td>
+    <td align="center"><img src="docs/screenshots/mobile-apply-review.png" width="200" alt="Rider application review and submit"><br><sub>Review and submit</sub></td>
   </tr>
 </table>
 
