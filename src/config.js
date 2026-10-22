@@ -254,6 +254,9 @@ const PROMOS = {
 
 const SAFETY = {
   police: '100', ambulance: '102', touristPolice: '1144', fire: '101',
+  shareMax: 5, // close ones a customer can send one trip to
+  // Public address of this server, for live-trip links sent by SMS (e.g. https://myride.com.np).
+  publicUrl: (process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/$/, ''),
 };
 
 const DISPATCH = {

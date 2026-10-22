@@ -159,6 +159,33 @@ test('first ride is free (up to Rs 100) while the driver is paid in full; PIN re
   assert.equal((await api('GET', '/api/profile', null, rider.token)).body.firstRideFree, false);
 });
 
+test('share trip: the customer picks close ones, who get the live link by SMS, then "arrived safely"', async () => {
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
+  const share = (contacts, token = rider.token) => api('POST', `/api/trips/${t.id}/share`, { contacts }, token);
+  assert.equal((await share([{ name: 'Wrong', phone: '12345' }])).status, 400);
+  assert.equal((await share([{ name: 'Aama', phone: '9811111111' }], bikeDrv.token)).status, 403, 'the rider driving cannot share it');
+  let mark = smsSent.length; // later tests read the whole SMS history: look only at what this test sends
+  const r = await share([{ name: 'Aama', phone: '+977 981-1111111' }, { name: 'Didi', phone: '9822222222' }, { name: 'Me', phone: '9846000001' }]);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.sharedWith.map((c) => c.phone), ['9811111111', '9822222222'], 'numbers cleaned, own number skipped');
+  await new Promise((ok) => setImmediate(ok));
+  const texts = smsSent.slice(mark).filter((s) => ['9811111111', '9822222222'].includes(s.phone));
+  assert.equal(texts.length, 2);
+  assert.match(texts[0].text, /Aarati is on a trip .*Follow live: .*\/track\.html\?t=/);
+  assert.equal((await share([{ name: 'Aama again', phone: '9811111111' }])).body.sharedWith.length, 2, 'no duplicate SMS');
+  const profile = (await api('GET', '/api/profile', null, rider.token)).body;
+  assert.deepEqual(profile.closeContacts.map((c) => c.name).slice(0, 2), ['Aama', 'Didi'], 'remembered for next time');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  mark = smsSent.length;
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  await new Promise((ok) => setImmediate(ok));
+  assert.equal(smsSent.slice(mark).filter((s) => /has arrived at/.test(s.text)).length, 2);
+  assert.equal((await share([{ name: 'Late', phone: '9833333333' }])).status, 409, 'sharing ends with the trip');
+  assert.equal((await api('DELETE', '/api/profile/close-contacts/9822222222', null, rider.token)).body.closeContacts.some((c) => c.phone === '9822222222'), false);
+});
+
 test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
   const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');

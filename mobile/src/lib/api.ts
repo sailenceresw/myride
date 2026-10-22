@@ -54,6 +54,7 @@ export type Trip = {
   payment: { method: string; status: string };
   driver: null | { name: string; phone: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; fleet?: boolean };
   deliveryOtp?: string; recipient?: { name: string; phone: string }; riderRating?: { stars: number };
+  sharedWith?: { name: string; phone: string }[]; // close ones following this trip by SMS
 };
 /** In-trip chat. `from` uses the server's names: 'rider' = the customer, 'driver' = the person driving. */
 export type ChatMessage = { id: string; from: 'rider' | 'driver'; text: string; at: number };

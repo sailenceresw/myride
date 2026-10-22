@@ -35,6 +35,8 @@ module.exports = ({ config }) => ({
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', ...(DRIVER ? ['CAMERA', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION'] : [])],
+    // expo-contacts also asks to edit contacts; MyRide only reads the one person the customer picks to share a trip with.
+    blockedPermissions: ['android.permission.WRITE_CONTACTS'],
   },
   web: { favicon: './assets/favicon.png', bundler: 'metro' },
   plugins: [
@@ -42,6 +44,7 @@ module.exports = ({ config }) => ({
     'expo-secure-store',
     'expo-web-browser',
     ['expo-notifications', { color: DRIVER ? '#075a52' : '#0b7a6f' }],
+    ...(DRIVER ? [] : [['expo-contacts', { contactsPermission: 'MyRide opens your contacts only when you choose someone to share your trip with.' }]]),
     [
       'expo-location',
       {

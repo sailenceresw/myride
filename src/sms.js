@@ -80,10 +80,16 @@ async function sendSms(phone, text, opts = {}) {
 }
 
 // Message templates (≤ 160 GSM chars). OTP format works with Android SMS Retriever and iOS one-time-code auto-fill.
+const first = (name) => String(name || 'Your contact').split(' ')[0];
+const cut = (s) => String(s || '').replace(/ \(.*\)$/, '').slice(0, 28);
 const templates = {
   otp: (code) => `<#> ${code} is your MyRide code. Valid 5 min. Never share it — MyRide staff will never ask.${process.env.ANDROID_SMS_HASH ? ` ${process.env.ANDROID_SMS_HASH}` : ''}`,
   deliveryCode: ({ code, sender, km }) => `MyRide: a delivery from ${String(sender).slice(0, 20)} is on its way (${km} km). Give the driver code ${code} only after you receive it.`,
   kycApproved: (name) => `MyRide: Congratulations ${String(name).split(' ')[0]}! You are approved as a MyRide rider. Install MyRide Drive, sign in with this number and go online.`,
+  // Sent only to people the customer chose to share a trip with.
+  tripShared: ({ name, from, to, driver, plate, link }) => `MyRide: ${first(name)} is on a trip ${cut(from)} → ${cut(to)}${driver ? ` with ${first(driver)} (${plate})` : ''}. Follow live: ${link}`,
+  tripArrived: ({ name, to }) => `MyRide: ${first(name)} has arrived at ${cut(to)}. The trip ended safely.`,
+  tripSos: ({ name, link }) => `MyRide SOS: ${first(name)} pressed the emergency button during a trip. Live location: ${link} Nepal Police: 100`,
   kycAction: (status, reason) => `MyRide Drive: your application needs attention (${status}). ${String(reason || '').slice(0, 90)}`,
 };
 
