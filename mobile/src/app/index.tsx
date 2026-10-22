@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/auth';
 import { IS_DRIVE } from '@/lib/config';
 import { useTheme } from '@/lib/theme';
 
-// Entry: send each store app to its own home (MyRide → /rider, MyRide Drive → /driver), or to login.
+// Entry: send each store app to its own home (MyRide → /customer, MyRide Drive → /drive), or to login.
 export default function Index() {
   const { ready, token } = useAuth();
   const t = useTheme();

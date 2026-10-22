@@ -43,16 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  const load = useCallback(async (t: string | null) => {
+  // `keep` (refresh): re-fetch the profile without blanking it, so open screens don't unmount and flash.
+  const load = useCallback(async (t: string | null, keep = false) => {
     setApiToken(t);
     setToken(t);
-    setProfile(null);
+    if (!keep) setProfile(null);
     if (!t) return;
     try {
       const me = await api<{ portal: string; user: Profile }>('GET', '/api/me');
       if (me.portal !== PORTAL) throw new ApiError(403, 'wrong portal');
       setProfile(me.user);
-      registerPush();
+      if (!keep) registerPush(); // once per sign-in / app start, not on every refresh
     } catch (e) {
       // Only a rejected session signs the user out — offline / server restarts keep the token.
       if (e instanceof ApiError && [401, 403].includes(e.status)) { await storage.del(); setApiToken(null); setToken(null); }
@@ -69,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await storage.set(r.token);
       await load(r.token);
     },
-    refresh: () => load(token),
+    refresh: () => load(token, true),
     signOut: async () => { await unregisterPush(); await storage.del(); await load(null); router.replace('/login'); },
   }), [ready, token, profile, load]);
 

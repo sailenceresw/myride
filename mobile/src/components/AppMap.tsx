@@ -5,39 +5,57 @@ import { WebView } from 'react-native-webview';
 import { POKHARA } from '@/lib/config';
 
 export type Pt = { lat: number; lng: number };
-/** pickup / drop: pins with an optional label bubble · vehicle: round emoji badge · me: pulsing location dot. */
-export type MapMarker = { key: string; at: Pt; kind?: 'pickup' | 'drop' | 'vehicle' | 'me'; color?: string; emoji?: string; label?: string; size?: number };
+/**
+ * pickup (black circle) / drop (black square): pin on a stem with an optional label and ETA block, like Uber.
+ * vehicle: top-down car / bike pointing along `heading` (`vehicle` = vehicle type) · me: pulsing location dot.
+ */
+export type MapMarker = {
+  key: string; at: Pt; kind?: 'pickup' | 'drop' | 'vehicle' | 'me'; color?: string;
+  label?: string; eta?: string; vehicle?: string; heading?: number | null; emoji?: string; size?: number;
+};
 export type MapLine = { coords: Pt[]; color: string; width: number; casing?: boolean };
 export type Padding = { top: number; right: number; bottom: number; left: number };
 export type MapHandle = {
   flyTo: (c: Pt, o?: { zoom?: number; heading?: number; pitch?: number; duration?: number }) => void;
   fit: (points: Pt[], pad?: Partial<Padding>) => void;
 };
-type Props = { markers?: MapMarker[]; lines?: MapLine[]; user?: Pt | null; padding?: Partial<Padding>; traffic?: boolean; onUserPan?: () => void; ref?: Ref<MapHandle> };
+/** onIdle: the map's centre each time it comes to rest (pin-on-map picking). */
+type Props = { markers?: MapMarker[]; lines?: MapLine[]; user?: Pt | null; padding?: Partial<Padding>; traffic?: boolean; onUserPan?: () => void; onIdle?: (centre: Pt) => void; ref?: Ref<MapHandle> };
 
 const PAD: Padding = { top: 0, right: 0, bottom: 0, left: 0 };
 const ll = ({ lat, lng }: Pt) => ({ latitude: lat, longitude: lng });
-const PIN = { pickup: '#0b7a6f', drop: '#f29e1f' };
+const INK = '#111111';
 
 /**
  * The app's map: same props on both backends.
- * - Native Google/Apple maps in store builds (EXPO_PUBLIC_HAS_MAPS_KEY=1 with GOOGLE_MAPS_*_KEY), MyRide-styled.
- * - Otherwise a Leaflet map in a WebView on OpenStreetMap tiles — Expo Go's Google key fails with "Authorization
- *   failure" and an unauthorised Google map draws nothing at all, not even custom tiles. OSM's tile servers need a
- *   Referer (the WebView's baseUrl provides one) and are for light use only: production uses the native maps.
+ * - Native Google/Apple maps in store builds (EXPO_PUBLIC_HAS_MAPS_KEY=1 with GOOGLE_MAPS_*_KEY), with a muted grey style.
+ * - Otherwise a MapLibre map in a WebView on OpenFreeMap's vector tiles (Positron / dark styles, OpenStreetMap data;
+ *   free, no key) — Expo Go's Google key fails with "Authorization failure".
  */
 // react-native-maps is native-only: load it lazily so the web preview (expo start --web) still runs.
 const Maps: typeof import('react-native-maps') | null = Platform.OS === 'web' ? null : require('react-native-maps'); // eslint-disable-line @typescript-eslint/no-require-imports
 export const AppMap = process.env.EXPO_PUBLIC_HAS_MAPS_KEY && Maps ? NativeMap : WebMap;
 
-// Google Maps styles: quiet roads and POIs so MyRide's pins and route stand out.
-const quiet = [{ featureType: 'poi.business', stylers: [{ visibility: 'off' }] }, { featureType: 'transit', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] }];
+// Google Maps styles in the spirit of Uber's: grey land, white roads, no business POIs or icons.
 const GOOGLE_STYLE = {
-  light: [...quiet, { elementType: 'geometry', stylers: [{ saturation: -35 }, { lightness: 8 }] }, { featureType: 'water', stylers: [{ color: '#b9dde6' }] }],
-  dark: [...quiet, { elementType: 'geometry', stylers: [{ color: '#1d2524' }] }, { elementType: 'labels.text.fill', stylers: [{ color: '#9fb1ae' }] }, { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2c3836' }] }, { featureType: 'water', stylers: [{ color: '#0f2a30' }] }],
+  light: [
+    { elementType: 'geometry', stylers: [{ color: '#f2f3f3' }] }, { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#6b6f70' }] }, { elementType: 'labels.text.stroke', stylers: [{ color: '#f2f3f3' }] },
+    { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#e8eaea' }] }, { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#dfe9df' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] }, { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#e1e3e3' }] },
+    { featureType: 'transit', stylers: [{ visibility: 'off' }] }, { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#cfdde4' }] },
+  ],
+  dark: [
+    { elementType: 'geometry', stylers: [{ color: '#1c1e1f' }] }, { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#8a8f90' }] }, { elementType: 'labels.text.stroke', stylers: [{ color: '#1c1e1f' }] },
+    { featureType: 'poi.business', stylers: [{ visibility: 'off' }] }, { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#1f2a22' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2c2f30' }] }, { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3a3e3f' }] },
+    { featureType: 'transit', stylers: [{ visibility: 'off' }] }, { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f1a20' }] },
+  ],
 };
 
-function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan, ref }: Props) {
+function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan, onIdle, ref }: Props) {
   const { default: Map, Marker, Polyline, PROVIDER_GOOGLE } = Maps!;
   const dark = useColorScheme() === 'dark';
   const map = useRef<MapView>(null);
@@ -46,6 +64,7 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
     flyTo: (c, { zoom = 16, heading, pitch, duration = 700 } = {}) => map.current?.animateCamera({ center: ll(c), zoom, altitude: 7e7 / 2 ** zoom, heading, pitch }, { duration }),
     fit: (points, pad) => map.current?.fitToCoordinates(points.map(ll), { edgePadding: { ...PAD, ...pad }, animated: true }),
   }), []);
+  const fg = dark ? '#ffffff' : INK;
   return (
     <Map
       ref={map}
@@ -56,21 +75,29 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
       showsUserLocation={!!user}
       showsMyLocationButton={false}
       showsCompass={false}
+      showsPointsOfInterests={false}
       showsTraffic={traffic}
       onPanDrag={onUserPan}
+      onRegionChangeComplete={onIdle ? (r) => onIdle({ lat: r.latitude, lng: r.longitude }) : undefined}
       mapPadding={{ ...PAD, ...padding }}
     >
       {lines.flatMap((l, i) => l.coords.length < 2 ? [] : [
-        ...(l.casing !== false ? [<Polyline key={`c${i}`} coordinates={l.coords.map(ll)} strokeColor={dark ? '#0d1413' : '#ffffff'} strokeWidth={l.width + 4} lineCap="round" lineJoin="round" />] : []),
-        <Polyline key={`l${i}`} coordinates={l.coords.map(ll)} strokeColor={l.color} strokeWidth={l.width} lineCap="round" lineJoin="round" />,
+        ...(l.casing !== false ? [<Polyline key={`c${i}`} coordinates={l.coords.map(ll)} strokeColor={dark ? '#000000' : '#ffffff'} strokeWidth={l.width + 4} lineCap="round" lineJoin="round" />] : []),
+        <Polyline key={`l${i}`} coordinates={l.coords.map(ll)} strokeColor={dark && l.color === INK ? '#ffffff' : l.color} strokeWidth={l.width} lineCap="round" lineJoin="round" />,
       ])}
       {markers.map((m) => (
-        <Marker key={m.key} coordinate={ll(m.at)} anchor={m.kind === 'vehicle' ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }} tracksViewChanges={false}>
+        <Marker key={m.key} coordinate={ll(m.at)} anchor={m.kind === 'vehicle' ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }} rotation={m.kind === 'vehicle' ? m.heading ?? 0 : 0} flat={m.kind === 'vehicle'} tracksViewChanges={false}>
           {m.kind === 'vehicle'
-            ? <View style={styles.veh}><Text style={{ fontSize: m.size ?? 20 }}>{m.emoji}</Text></View>
+            ? <Text style={{ fontSize: m.size ?? 22 }}>{m.emoji}</Text>
             : <View style={{ alignItems: 'center' }}>
-                {!!m.label && <View style={[styles.bubble, dark && { backgroundColor: '#162020' }]}><Text style={[styles.bubbleText, dark && { color: '#e9f0ef' }]} numberOfLines={1}>{m.label}</Text></View>}
-                <View style={[styles.pin, m.kind === 'drop' && { borderRadius: 6 }, { backgroundColor: m.color ?? PIN[m.kind === 'drop' ? 'drop' : 'pickup'] }]}><View style={styles.pinDot} /></View>
+                {!!m.label && (
+                  <View style={[styles.label, dark && { backgroundColor: '#1f2122' }]}>
+                    {!!m.eta && <View style={styles.eta}><Text style={styles.etaText}>{m.eta}</Text></View>}
+                    <Text style={[styles.labelText, dark && { color: '#fff' }]} numberOfLines={1}>{m.label}</Text>
+                  </View>
+                )}
+                <View style={[styles.pin, m.kind === 'drop' && { borderRadius: 3 }, { backgroundColor: m.color ?? fg }]}><View style={[styles.pinDot, m.kind === 'drop' && { borderRadius: 1 }, { backgroundColor: dark ? INK : '#fff' }]} /></View>
+                <View style={[styles.stem, { backgroundColor: m.color ?? fg }]} />
               </View>}
         </Marker>
       ))}
@@ -78,53 +105,71 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
   );
 }
 
-// Leaflet page: draw(state) replaces markers/lines (and the light/dark theme); fly (animated pan — flyTo would
-// zoom-pulse on every GPS fix) and fit move the camera, offset for the bottom sheet.
+// MapLibre page (vector tiles): draw(state) replaces markers/lines (and the light/dark style); fly and fit move the
+// camera with padding for the bottom sheet.
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<style>html,body,#m{margin:0;height:100%;background:#eef1ee}.leaflet-div-icon{background:none;border:0}
-body.dark,body.dark #m{background:#111918}
-.leaflet-tile-pane{filter:saturate(.55) brightness(1.05) contrast(.94)}
-body.dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.45)}
-.leaflet-control-attribution{font-size:9px;background:#ffffffb0!important}body.dark .leaflet-control-attribution{background:#111918b0!important;color:#9fb1ae}
-.pw{display:flex;flex-direction:column;align-items:center;position:absolute;bottom:0;left:50%;transform:translateX(-50%)}
-.bubble{background:#fff;color:#101a19;font:700 12px/1.2 system-ui,sans-serif;padding:6px 10px;border-radius:10px;box-shadow:0 2px 8px #0003;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
-body.dark .bubble{background:#162020;color:#e9f0ef}
-.pin{width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 8px #0005;display:flex;align-items:center;justify-content:center}
-.pin.sq{border-radius:7px}.pin i{width:8px;height:8px;border-radius:50%;background:#fff}
-.veh{width:36px;height:36px;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0004;display:flex;align-items:center;justify-content:center;line-height:1}
-body.dark .veh{background:#1e2a29}
-.me{position:relative;width:16px;height:16px}.me b{position:absolute;inset:0;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 1px 4px #0006}
-.me i{position:absolute;inset:-14px;border-radius:50%;background:#1a73e855;animation:p 2s ease-out infinite}
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>html,body,#m{margin:0;height:100%;background:#f2f3f3;font-family:system-ui,-apple-system,Roboto,sans-serif}
+body.dark,body.dark #m{background:#1c1e1f}
+.maplibregl-ctrl-attrib{font-size:9px}body.dark .maplibregl-ctrl-attrib{background:#1c1e1fa0;color:#888}body.dark .maplibregl-ctrl-attrib a{color:#888}
+.pw{display:flex;flex-direction:column;align-items:center}
+.lab{display:flex;align-items:stretch;background:#fff;border-radius:6px;box-shadow:0 3px 10px #0003;overflow:hidden;margin-bottom:6px;max-width:210px}
+body.dark .lab{background:#1f2122}
+.lab b{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#111;color:#fff;font:800 14px/1 inherit;padding:5px 8px;min-width:30px}
+.lab b small{font:600 9px/1.2 inherit;opacity:.85}
+.lab span{display:flex;align-items:center;gap:6px;color:#111;font:700 13px/1.2 inherit;padding:8px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.dark .lab span{color:#fff}.lab span:after{content:'›';font-size:16px;color:#999}
+.pin{width:18px;height:18px;border-radius:50%;background:#111;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #0004}
+.pin.sq{border-radius:3px}.pin i{width:6px;height:6px;border-radius:50%;background:#fff}.pin.sq i{border-radius:1px}
+.stem{width:2px;height:12px;background:#111}
+body.dark .pin,body.dark .stem{background:#fff}body.dark .pin i{background:#111}
+.veh{display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 2px #0005);transition:transform .8s}
+.me{position:relative;width:18px;height:18px}.me b{position:absolute;inset:0;border-radius:50%;background:#276ef1;border:3px solid #fff;box-shadow:0 1px 4px #0006}
+.me i{position:absolute;inset:-16px;border-radius:50%;background:#276ef144;animation:p 2s ease-out infinite}
 @keyframes p{0%{transform:scale(.3);opacity:.9}100%{transform:scale(1.2);opacity:0}}</style></head><body><div id="m"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-const map=L.map('m',{zoomControl:false}).setView([${POKHARA.latitude},${POKHARA.longitude}],14);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,referrerPolicy:'strict-origin-when-cross-origin',attribution:'© OpenStreetMap'}).addTo(map);
-const layer=L.layerGroup().addTo(map);let pad={top:0,right:0,bottom:0,left:0},dark=false;
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script><script>
+// OpenFreeMap: free OpenStreetMap vector tiles, no key. Positron = Uber-like grey; dark for night mode.
+const STYLES={light:'https://tiles.openfreemap.org/styles/positron',dark:'https://tiles.openfreemap.org/styles/dark'};
+const map=new maplibregl.Map({container:'m',style:STYLES.light,center:[${POKHARA.longitude},${POKHARA.latitude}],zoom:13.5,dragRotate:false,pitchWithRotate:false,attributionControl:{compact:true}});
+map.touchZoomRotate.disableRotation();
+let pad={top:0,right:0,bottom:0,left:0},dark=false,lines=[],pins=[];
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const icon=m=>{
-  if(m.kind==='me')return L.divIcon({iconSize:[16,16],html:'<div class="me"><i></i><b></b></div>'});
-  if(m.kind==='vehicle')return L.divIcon({iconSize:[36,36],html:'<div class="veh" style="font-size:'+(m.size||20)+'px">'+m.emoji+'</div>'});
-  const c=m.color||(m.kind==='drop'?'${PIN.drop}':'${PIN.pickup}');
-  return L.divIcon({iconSize:[0,0],html:'<div class="pw">'+(m.label?'<div class="bubble">'+esc(m.label)+'</div>':'')+'<div class="pin'+(m.kind==='drop'?' sq':'')+'" style="background:'+c+'"><i></i></div></div>'});};
+// Top-down vehicles (pointing north, rotated to their heading).
+const BODY={car:['#1b1f20','#5f6a6b'],car_ev:['#1b1f20','#5f6a6b'],jeep:['#2a2f30','#6b7677'],van:['#e9ecec','#4d5657'],pickup:['#2a2f30','#6b7677'],cargo:['#e9ecec','#4d5657'],truck_light:['#e9ecec','#4d5657'],truck:['#e9ecec','#4d5657']};
+const LEN={van:42,pickup:40,cargo:44,truck_light:48,truck:54,jeep:38};
+const carSvg=(t)=>{const[b,w]=BODY[t]||BODY.car,h=LEN[t]||36;return '<svg width="20" height="'+h+'" viewBox="0 0 20 '+h+'"><rect x="1.5" y="1" width="17" height="'+(h-2)+'" rx="6" fill="'+b+'" stroke="#0006" stroke-width=".6"/><rect x="4" y="7" width="12" height="6" rx="2" fill="'+w+'"/><rect x="4" y="'+(h-10)+'" width="12" height="4" rx="1.5" fill="'+w+'"/>'+(t==='car_ev'?'<rect x="9" y="15" width="2" height="'+(h-27)+'" fill="#1f9d55"/>':'')+'</svg>';};
+const bikeSvg=(ev)=>'<svg width="16" height="32" viewBox="0 0 16 32"><rect x="6" y="1" width="4" height="9" rx="2" fill="#151819"/><rect x="6" y="22" width="4" height="9" rx="2" fill="#151819"/><rect x="1" y="8" width="14" height="2.6" rx="1.3" fill="#151819"/><ellipse cx="8" cy="16.5" rx="5" ry="7.5" fill="#2b3132"/><circle cx="8" cy="15" r="3.6" fill="'+(ev?'#1f9d55':'#f29e1f')+'" stroke="#0005" stroke-width=".6"/></svg>';
+const vehicle=m=>{const bike=!m.vehicle||m.vehicle.startsWith('bike');return '<div class="veh" style="transform:rotate('+(m.heading||0)+'deg)">'+(bike?bikeSvg(m.vehicle==='bike_ev'):carSvg(m.vehicle))+'</div>';};
+const el=html=>{const d=document.createElement('div');d.innerHTML=html;return d.firstChild;};
+const markerEl=m=>{
+  if(m.kind==='me')return el('<div class="me"><i></i><b></b></div>');
+  if(m.kind==='vehicle')return el('<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center">'+vehicle(m)+'</div>');
+  const eta=m.eta?String(m.eta).split(' '):null;
+  return el('<div class="pw">'+(m.label?'<div class="lab">'+(eta?'<b>'+esc(eta[0])+(eta[1]?'<small>'+esc(eta.slice(1).join(' '))+'</small>':'')+'</b>':'')+'<span>'+esc(m.label)+'</span></div>':'')
+    +'<div class="pin'+(m.kind==='drop'?' sq':'')+'"'+(m.color?' style="background:'+m.color+'"':'')+'><i></i></div><div class="stem"'+(m.color?' style="background:'+m.color+'"':'')+'></div></div>');};
 const send=t=>window.ReactNativeWebView.postMessage(t);
 map.on('dragstart',()=>send('pan'));
-// Camera moves run one at a time (latest wins): Leaflet drops or overrides a move made while another animates.
-let busy=false,next=null;
-const move=(f,ms)=>{if(busy){next=[f,ms];return;}busy=true;let done=false;
-  const end=()=>{if(done)return;done=true;busy=false;const n=next;next=null;if(n)move(...n);};
-  map.once('moveend',end);setTimeout(end,ms+400);f();};window.mr={
-  draw(s){pad=s.pad;layer.clearLayers();document.body.classList.toggle('dark',!!s.dark);
-    s.lines.forEach(l=>{const pts=l.coords.map(p=>[p.lat,p.lng]);
-      if(l.casing!==false)L.polyline(pts,{color:s.dark?'#0d1413':'#fff',weight:l.width+5,lineCap:'round',lineJoin:'round',opacity:.95}).addTo(layer);
-      L.polyline(pts,{color:l.color,weight:l.width,lineCap:'round',lineJoin:'round'}).addTo(layer);});
-    s.markers.forEach(m=>L.marker([m.at.lat,m.at.lng],{icon:icon(m),zIndexOffset:m.kind==='vehicle'?0:m.kind==='me'?500:1000}).addTo(layer));},
-  fly(c,z,ms){move(()=>{const p=map.project([c.lat,c.lng],z).add([(pad.right-pad.left)/2,(pad.bottom-pad.top)/2]);map.setView(map.unproject(p,z),z,{animate:true,duration:ms/1000});},ms);},
-  fit(pts,p){if(pts.length)move(()=>map.fitBounds(pts.map(x=>[x.lat,x.lng]),{paddingTopLeft:[p.left,p.top],paddingBottomRight:[p.right,p.bottom]}),600);}
+map.on('moveend',()=>{const c=map.getCenter();send('idle:'+c.lat.toFixed(6)+','+c.lng.toFixed(6));});
+// Route lines live in one GeoJSON source; re-added whenever the style (light/dark) reloads.
+const lineData=()=>({type:'FeatureCollection',features:lines.map(l=>({type:'Feature',properties:{color:dark&&l.color==='${INK}'?'#fff':l.color,width:l.width,casing:l.casing!==false},geometry:{type:'LineString',coordinates:l.coords.map(p=>[p.lng,p.lat])}}))});
+const applyLines=()=>{if(!map.isStyleLoaded())return;const src=map.getSource('mr');if(src)return src.setData(lineData());
+  map.addSource('mr',{type:'geojson',data:lineData()});
+  map.addLayer({id:'mr-casing',type:'line',source:'mr',filter:['get','casing'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':dark?'#000':'#fff','line-width':['+',['get','width'],4]}});
+  map.addLayer({id:'mr-line',type:'line',source:'mr',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['get','color'],'line-width':['get','width']}});};
+map.on('style.load',applyLines);
+window.mr={
+  draw(s){pad=s.pad;
+    if(!!s.dark!==dark){dark=!!s.dark;document.body.classList.toggle('dark',dark);map.setStyle(STYLES[dark?'dark':'light']);}
+    lines=s.lines;applyLines();
+    pins.forEach(p=>p.remove());
+    pins=s.markers.map(m=>{const e=markerEl(m);e.style.zIndex=m.kind==='vehicle'?1:m.kind==='me'?2:3;
+      return new maplibregl.Marker({element:e,anchor:m.kind==='vehicle'||m.kind==='me'?'center':'bottom'}).setLngLat([m.at.lng,m.at.lat]).addTo(map);});},
+  fly(c,z,ms){map.easeTo({center:[c.lng,c.lat],zoom:z,duration:ms,padding:pad});},
+  fit(pts,p){if(!pts.length)return;const b=new maplibregl.LngLatBounds();pts.forEach(x=>b.extend([x.lng,x.lat]));map.fitBounds(b,{padding:p,maxZoom:16.5,duration:600});}
 };send('ready');
 </script></body></html>`;
 
-function WebMap({ markers = [], lines = [], user, padding, onUserPan, ref }: Props) {
+function WebMap({ markers = [], lines = [], user, padding, onUserPan, onIdle, ref }: Props) {
   const web = useRef<WebView>(null);
   const dark = useColorScheme() === 'dark';
   const [ready, setReady] = useState(false);
@@ -147,21 +192,28 @@ function WebMap({ markers = [], lines = [], user, padding, onUserPan, ref }: Pro
   return (
     <WebView
       ref={web}
-      style={[StyleSheet.absoluteFill, { backgroundColor: dark ? '#111918' : '#eef1ee' }]}
+      style={[StyleSheet.absoluteFill, { backgroundColor: dark ? '#1c1e1f' : '#f2f3f3' }]}
       source={{ html: HTML, baseUrl: 'https://myride.local/' }}
       originWhitelist={['*']}
       javaScriptEnabled
       scrollEnabled={false}
       overScrollMode="never"
-      onMessage={(e) => (e.nativeEvent.data === 'ready' ? setReady(true) : onUserPan?.())}
+      onMessage={(e) => {
+        const msg = e.nativeEvent.data;
+        if (msg === 'ready') setReady(true);
+        else if (msg === 'pan') onUserPan?.();
+        else if (msg.startsWith('idle:')) { const [lat, lng] = msg.slice(5).split(',').map(Number); onIdle?.({ lat, lng }); }
+      }}
     />
   );
 }
 
 const styles = StyleSheet.create({
-  veh: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4 },
-  bubble: { backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6, maxWidth: 180, elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6 },
-  bubbleText: { fontSize: 12, fontWeight: '700', color: '#101a19' },
-  pin: { width: 24, height: 24, borderRadius: 12, borderWidth: 3, borderColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 5, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4 },
-  pinDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
+  label: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#fff', borderRadius: 6, overflow: 'hidden', marginBottom: 6, maxWidth: 210, elevation: 4, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6 },
+  eta: { backgroundColor: INK, paddingHorizontal: 8, justifyContent: 'center' },
+  etaText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  labelText: { fontSize: 13, fontWeight: '700', color: INK, paddingHorizontal: 10, paddingVertical: 8 },
+  pin: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3 },
+  pinDot: { width: 6, height: 6, borderRadius: 3 },
+  stem: { width: 2, height: 12 },
 });

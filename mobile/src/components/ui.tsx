@@ -146,13 +146,16 @@ export function Hero({ children, style, colors = GRADIENT }: { children: ReactNo
   return <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 28 }, style]}><StatusBar style="light" />{children}</LinearGradient>;
 }
 
+/** Back, or to this app's home when there is no history (screen opened from a notification or deep link). */
+export const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
 /** Back button + title used by every pushed screen (`light` for use on a Hero). */
-export function BackHeader({ title, light }: { title: string; light?: boolean }) {
+export function BackHeader({ title, light, onBack = goBack }: { title: string; light?: boolean; onBack?: () => void }) {
   const t = useTheme();
   const c = light ? '#fff' : t.ink;
   return (
     <Row style={{ paddingVertical: 8, gap: 12 }}>
-      <Pressable onPress={() => router.back()} accessibilityLabel="Back" hitSlop={10} style={[styles.center, { width: 40, height: 40, borderRadius: 20, backgroundColor: light ? '#ffffff22' : t.chip }]}>
+      <Pressable onPress={onBack} accessibilityLabel="Back" hitSlop={10} style={[styles.center, { width: 40, height: 40, borderRadius: 20, backgroundColor: light ? '#ffffff22' : t.chip }]}>
         <Icon name="chevron-back" size={22} color={c} />
       </Pressable>
       <Text style={[TXT.h2, { color: c }]}>{title}</Text>

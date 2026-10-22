@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { BackHeader, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { BackHeader, Button, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
 import { api, rs } from '@/lib/api';
 import { shadow, useTheme } from '@/lib/theme';
 
@@ -14,8 +15,23 @@ type Dash = {
 export default function Earnings() {
   const t = useTheme();
   const [d, setD] = useState<Dash | null>(null);
-  useEffect(() => { api<Dash>('GET', '/api/driver/dashboard').then(setD).catch(() => {}); }, []);
-  if (!d?.driver) return <View style={{ flex: 1, backgroundColor: t.bg }} />;
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(() => api<Dash>('GET', '/api/driver/dashboard').then((r) => { setD(r); setFailed(false); }).catch(() => setFailed(true)), []);
+  useEffect(() => { load(); }, [load]);
+  if (!d?.driver) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg, paddingHorizontal: 16 }}>
+        <BackHeader title="Earnings" />
+        <View style={styles.center}>
+          {failed ? <>
+            <Icon name="cloud-offline-outline" size={56} color={t.muted} />
+            <Txt kind="h2">{"Can't load your earnings"}</Txt>
+            <Button title="Try again" icon="refresh" kind="soft" onPress={load} style={{ alignSelf: 'stretch' }} />
+          </> : <ActivityIndicator color={t.brand} size="large" />}
+        </View>
+      </SafeAreaView>
+    );
+  }
   const emp = d.driver.driverType === 'employee';
   const owes = d.driver.wallet < 0 && !emp;
   return (
@@ -72,6 +88,7 @@ function Stat({ icon, label, value }: { icon: 'cash-outline' | 'car-outline'; la
 }
 
 const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 24 },
   caption: { color: '#ffffffc0', fontSize: 14 },
   big: { color: '#fff', fontSize: 40, fontWeight: '900', marginVertical: 4, letterSpacing: -0.5 },
   stat: { flex: 1, borderRadius: 18, padding: 14 },
