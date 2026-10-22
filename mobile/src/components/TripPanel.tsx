@@ -24,7 +24,9 @@ const roadMin = (a: Point, b: Point) => {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip: Trip; err: string; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void }) {
+export function TripPanel({ trip, err, unread, onMessage, onCancel, onRate, onSos, onDone }: {
+  trip: Trip; err: string; unread: number; onMessage: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
+}) {
   const t = useTheme();
   const now = useNow();
   const d = trip.driver;
@@ -73,6 +75,7 @@ export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip
 
       {live && d && (
         <Row style={{ marginTop: 10 }}>
+          <Action icon="chatbubble-ellipses" label="Message" onPress={onMessage} badge={unread} />
           <Action icon="call" label="Call" onPress={() => call(d.phone)} />
           <Action icon="share-social" label="Share trip" onPress={share} />
           <Action icon="warning" label="SOS" onPress={onSos} danger />
@@ -137,11 +140,12 @@ function Rating({ trip, onRate }: { trip: Trip; onRate: (s: number, comment: str
   );
 }
 
-function Action({ icon, label, onPress, danger }: { icon: IconName; label: string; onPress: () => void; danger?: boolean }) {
+function Action({ icon, label, onPress, danger, badge }: { icon: IconName; label: string; onPress: () => void; danger?: boolean; badge?: number }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.action, { backgroundColor: danger ? t.dangerSoft : t.chip, opacity: pressed ? 0.7 : 1 }]}>
+    <Pressable onPress={onPress} accessibilityLabel={badge ? `${label}, ${badge} unread` : label} style={({ pressed }) => [styles.action, { backgroundColor: danger ? t.dangerSoft : t.chip, opacity: pressed ? 0.7 : 1 }]}>
       <Icon name={icon} size={20} color={danger ? t.danger : t.ink} /><Text style={{ fontSize: 12, fontWeight: '700', color: danger ? t.danger : t.ink }}>{label}</Text>
+      {!!badge && <View style={[styles.badge, { backgroundColor: t.danger }]}><Text style={styles.badgeText}>{badge > 9 ? '9+' : badge}</Text></View>}
     </Pressable>
   );
 }
@@ -162,5 +166,7 @@ const styles = StyleSheet.create({
   action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
   pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: 6, right: 14, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   comment: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
 });

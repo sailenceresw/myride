@@ -32,7 +32,7 @@ const OTP = {
 };
 
 function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, face = createFaceVerifier(), otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
-  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog']) if (!store.db[c]) store.db[c] = {};
+  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog', 'messages']) if (!store.db[c]) store.db[c] = {};
   if (!Array.isArray(store.db.smsLog)) store.db.smsLog = [];
   const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
 
@@ -383,6 +383,45 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const d = trip.driverId && store.get('drivers', trip.driverId);
     if (d) bus.emit(d.userId, { type: 'trip', role: 'driver', trip: driverView(trip, d) });
     bus.emit(`share:${trip.shareToken}`, { type: 'trip', trip: publicView(trip) });
+  }
+
+  // ---------- chat between customer and rider during a trip ----------
+  const CHAT_OPEN = ['accepted', 'arrived', 'in_progress'];
+  const CHAT_MAX_PER_SENDER = 60;
+  const DEMO_REPLIES = ["Okay 👍", "I'm on my way, about 2 minutes.", 'I can see you, coming now.', 'Please wait at the pickup point.'];
+
+  /** Who `user` is on trip `t`: 'rider' (the customer — legacy server name) or 'driver'. */
+  function chatRole(user, t) {
+    if (t.riderId === user.id) return 'rider';
+    const d = driverOf(user);
+    if (d && t.driverId === d.id) return 'driver';
+    return fail(403, 'Not your trip');
+  }
+  function messages(user, id) {
+    const t = getTripFor(user, id);
+    chatRole(user, t);
+    return store.all('messages').filter((m) => m.tripId === t.id).sort((a, b) => a.at - b.at).map(({ id: mid, from, text, at }) => ({ id: mid, from, text, at }));
+  }
+  function sendMessage(user, id, text) {
+    const t = getTripFor(user, id);
+    const from = chatRole(user, t);
+    if (!CHAT_OPEN.includes(t.status) || !t.driverId) fail(409, 'You can message once a rider has accepted, until the trip ends');
+    text = String(text || '').trim().slice(0, 300);
+    if (!text) fail(400, 'Write a message');
+    if (store.all('messages').filter((m) => m.tripId === t.id && m.from === from).length >= CHAT_MAX_PER_SENDER) fail(429, 'Too many messages on this trip. Please call instead');
+    const m = store.put('messages', { id: store.id('msg'), tripId: t.id, from, text, at: now() });
+    store.save();
+    const d = store.get('drivers', t.driverId);
+    const to = from === 'rider' ? d.userId : t.riderId;
+    const message = { id: m.id, from, text, at: m.at };
+    // `role` is the recipient's role, as for trip events; `fromName` is for the push notification.
+    bus.emit(to, { type: 'message', role: from === 'rider' ? 'driver' : 'rider', tripId: t.id, fromName: from === 'rider' ? t.riderName : d.name, message });
+    // Demo fleet (SIMULATE=1): simulated riders answer so the chat can be tried end to end.
+    const driverUser = store.get('users', d.userId);
+    if (from === 'rider' && driverUser?.simulated) {
+      setTimeout(() => { try { sendMessage(driverUser, t.id, DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)]); } catch { /* trip ended */ } }, 2500);
+    }
+    return message;
   }
 
   function getTripFor(user, id) {
@@ -851,7 +890,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }

@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Navigator } from '@/components/Navigator';
 import { AppMap, type MapHandle } from '@/components/AppMap';
+import { TripChat } from '@/components/TripChat';
 import { Avatar, Button, Card, Hero, Icon, ListRow, Pill, Pulse, RoundButton, Row, Sheet, Txt, type IconName } from '@/components/ui';
 import { api, ApiError, rs, type DriverTrip } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -14,6 +15,7 @@ import { shadow, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
 import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
+import { useTripChat } from '@/lib/useTripChat';
 
 type Driver = {
   online: boolean; driverType: 'partner' | 'employee'; rating: number; vehicle: { type: string; plate: string };
@@ -92,13 +94,15 @@ export default function DriverHome() {
     setTrip(still ? next : null);
     if (!still) load();
   };
+  const chat = useTripChat(trip?.id, 'driver'); // messages with the customer
   useEvents((e) => {
+    if (chat.receive(e)) return;
     if (e.type === 'offer' && !trip) showOffers([...offers.filter((x) => x.id !== e.trip.id), e.trip]); // queue behind the card on screen
     else if (e.type === 'trip' && e.role === 'driver' && e.trip.id === trip?.id) tripChanged(e.trip);
     else if (e.type === 'face_check') load(); // load() opens the selfie screen
   }, !!d?.online);
   usePolling(async () => {
-    if (trip) tripChanged(await api<DriverTrip>('GET', `/api/trips/${trip.id}`));
+    if (trip) { tripChanged(await api<DriverTrip>('GET', `/api/trips/${trip.id}`)); await chat.refresh(); }
     else showOffers(await api<DriverTrip[]>('GET', '/api/driver/offers'));
   }, 10000, !!d?.online);
 
@@ -179,12 +183,23 @@ export default function DriverHome() {
     );
   }
 
+  const chatModal = trip && (
+    <TripChat
+      visible={chat.visible} onClose={chat.close} tripId={trip.id} me="driver" open={ON_TRIP.includes(trip.status)}
+      name={trip.riderName} subtitle={`${trip.pickup.label} → ${trip.drop.label}`} phone={trip.riderPhone}
+      messages={chat.messages} onSent={chat.sent}
+      quickReplies={trip.status === 'accepted' ? ["I'm on my way", '2 minutes away', "I can't find you, please call", 'Okay 👍'] : ["I've arrived", 'I am waiting at the pickup', 'Okay 👍']}
+    />
+  );
+
   // ---------- on a trip: Uber-style navigation ----------
   if (trip && navigating) {
     const toPickup = trip.status === 'accepted';
     const dest = toPickup ? trip.pickup : trip.drop;
     const delivering = !toPickup && trip.kind === 'delivery';
     return (
+      <>
+      {chatModal}
       <Navigator
         key={`${trip.id}-${trip.status}`}
         destination={dest}
@@ -201,6 +216,7 @@ export default function DriverHome() {
                 <Txt style={{ fontWeight: '800' }}>{toPickup ? `Pick up ${trip.riderName}` : delivering ? `Deliver to ${trip.recipient?.name ?? 'receiver'}` : `Drop ${trip.riderName}`}</Txt>
                 <Txt kind="small">{rs(trip.fare)} · {trip.payment}{trip.parcel ? ` · ${trip.parcel.weightKg} kg${trip.parcel.codAmount ? ` · collect COD ${rs(trip.parcel.codAmount)}` : ''}` : ''}</Txt>
               </View>
+              {!delivering && <ChatButton unread={chat.unread} onPress={chat.open} />}
               <RoundButton icon="call" label="Call" color={t.brand} onPress={() => call(delivering ? trip.recipient?.phone : trip.riderPhone)} size={44} />
             </Row>
             {delivering && (
@@ -220,6 +236,7 @@ export default function DriverHome() {
           </View>
         }
       />
+      </>
     );
   }
 
@@ -227,6 +244,7 @@ export default function DriverHome() {
   const online = !!d?.online;
   return (
     <View style={{ flex: 1 }}>
+      {chatModal}
       <AppMap ref={map} user={fix} traffic padding={{ bottom: sheetH }} markers={trip ? [{ key: 'pickup', at: trip.pickup, kind: 'pickup', label: `Pickup · ${trip.riderName}` }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
@@ -261,7 +279,10 @@ export default function DriverHome() {
               <PinBoxes value={pin} onChange={setPin} />
               {!!err && <Row style={{ marginBottom: 6 }}><Icon name="alert-circle" size={18} color={t.danger} /><Text style={{ color: t.danger, flex: 1 }}>{err}</Text></Row>}
               <Button title="Start trip" icon="play" onPress={() => act('start', { pin })} loading={busy} disabled={pin.length !== 4} />
-              {trip.riderPhone && <Button title={`Call ${trip.riderName}`} icon="call-outline" kind="ghost" onPress={() => call(trip.riderPhone)} style={{ marginTop: 8 }} />}
+              <Row style={{ marginTop: 8 }}>
+                <Button title={chat.unread ? `Messages (${chat.unread})` : 'Message'} icon="chatbubble-ellipses-outline" kind="soft" onPress={chat.open} style={{ flex: 1 }} />
+                {trip.riderPhone && <Button title="Call" icon="call-outline" kind="ghost" onPress={() => call(trip.riderPhone)} style={{ flex: 1 }} />}
+              </Row>
             </>
           ) : offers[0] ? (
             <OfferCard key={offers[0].id} o={offers[0]} more={offers.length - 1} onAccept={() => accept(offers[0])} onExpire={dropOffer} />
@@ -293,6 +314,17 @@ export default function DriverHome() {
           )}
         </ScrollView>
       </Sheet>
+    </View>
+  );
+}
+
+/** Round message button with an unread count (navigation screen). */
+function ChatButton({ unread, onPress }: { unread: number; onPress: () => void }) {
+  const t = useTheme();
+  return (
+    <View>
+      <RoundButton icon="chatbubble-ellipses" label={unread ? `Message, ${unread} unread` : 'Message'} color={t.brand} onPress={onPress} size={44} />
+      {!!unread && <View style={[styles.unread, { backgroundColor: t.danger }]}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{unread > 9 ? '9+' : unread}</Text></View>}
     </View>
   );
 }
@@ -362,6 +394,7 @@ function OfferCard({ o, more, onAccept, onExpire }: { o: DriverTrip; more: numbe
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+  unread: { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   top: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   earn: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 99 },
   status: { width: 10, height: 10, borderRadius: 5 },

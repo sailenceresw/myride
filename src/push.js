@@ -19,6 +19,7 @@ const DRIVER = { cancelled: ['Trip cancelled', (t) => `${t.riderName} (customer)
 function notificationFor(msg) {
   if (msg.type === 'offer') return { portal: 'driver', title: 'New trip request', body: `${msg.trip.pickup.label} → ${msg.trip.drop.label} · ${msg.trip.pickupKm} km away`, url: '/drive' };
   if (msg.type === 'face_check' && msg.status === 'required') return { portal: 'driver', title: 'Selfie check required', body: 'Take a quick selfie to keep receiving trips', url: '/drive/selfie' };
+  if (msg.type === 'message') return { portal: msg.role, title: `Message from ${msg.fromName.split(' ')[0]}`, body: msg.message.text, url: msg.role === 'driver' ? '/drive' : '/customer' };
   if (msg.type !== 'trip') return null;
   const n = (msg.role === 'driver' ? DRIVER : RIDER)[msg.trip.status];
   return n && { portal: msg.role, title: n[0], body: n[1](msg.trip), url: msg.role === 'driver' ? '/drive' : '/customer' };

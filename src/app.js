@@ -203,6 +203,9 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const t = svc.getTripFor(req.user, req.params.id);
     return req.portal === 'driver' ? svc.driverView(t, svc.driverOf(req.user)) : svc.riderView(t);
   }));
+  // Chat between the customer and the rider while a trip is on (accepted → in progress).
+  app.get('/api/trips/:id/messages', anyAuth, wrap((req) => svc.messages(req.user, req.params.id)));
+  app.post('/api/trips/:id/messages', anyAuth, wrap((req) => svc.sendMessage(req.user, req.params.id, req.body.text)));
   app.post('/api/trips/:id/cancel', anyAuth, wrap((req) => svc.riderView(svc.cancelTrip(req.user, req.params.id, req.body.reason))));
   app.post('/api/trips/:id/rate', anyAuth, wrap((req) => { svc.rateTrip(req.user, req.params.id, req.body.stars, req.body.comment); return { ok: true }; }));
   app.post('/api/trips/:id/sos', anyAuth, wrap((req) => ({ incident: svc.sos(req.user, req.params.id, req.body.loc), call: SAFETY })));

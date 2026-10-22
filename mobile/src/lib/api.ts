@@ -55,6 +55,8 @@ export type Trip = {
   driver: null | { name: string; phone: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; fleet?: boolean };
   deliveryOtp?: string; recipient?: { name: string; phone: string }; riderRating?: { stars: number };
 };
+/** In-trip chat. `from` uses the server's names: 'rider' = the customer, 'driver' = the person driving. */
+export type ChatMessage = { id: string; from: 'rider' | 'driver'; text: string; at: number };
 export type DriverTrip = {
   id: string; status: string; kind: string; logistics?: boolean; service: string; fare: number; earning: number | null; employee: boolean;
   pickup: Point; drop: Point; km: number; pickupKm: number; deadKmBonus: number; payment: string;
