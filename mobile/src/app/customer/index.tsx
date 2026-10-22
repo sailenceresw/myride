@@ -7,6 +7,7 @@ import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
 import { MapPicker } from '@/components/MapPicker';
 import { PlaceSearch, type Kind, type Place, type Shortcut } from '@/components/PlaceSearch';
 import { QuoteRow } from '@/components/QuoteRow';
+import { PayScreen, type PayInit } from '@/components/PayScreen';
 import { ShareTrip } from '@/components/ShareTrip';
 import { TripChat } from '@/components/TripChat';
 import { TripPanel } from '@/components/TripPanel';
@@ -73,6 +74,7 @@ export default function CustomerHome() {
   const [promoApplied, setPromoApplied] = useState<string | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
   const [note, setNote] = useState(''); // for the rider: "blue gate opposite the school"
   const [noteOpen, setNoteOpen] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -122,7 +124,9 @@ export default function CustomerHome() {
   }, []);
   const loadTrips = useCallback(() => {
     api<Trip[]>('GET', '/api/trips').then((l) => {
-      setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? null);
+      // A trip in progress, or else a finished eSewa/Khalti ride still to pay (last 7 days), like Uber's outstanding balance.
+      const unpaid = l.find((x) => x.status === 'completed' && x.payment.method !== 'cash' && x.payment.status !== 'paid' && x.fare > 0 && Date.now() - x.createdAt < 7 * 86400000);
+      setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? unpaid ?? null);
       const seen = new Set<string>();
       setRecent(l.filter((x) => x.status === 'completed' && x.drop.label && !seen.has(x.drop.label) && seen.add(x.drop.label)).slice(0, 3).map((x) => x.drop));
     }).catch(() => {});
@@ -347,7 +351,7 @@ export default function CustomerHome() {
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onShare={() => setShareOpen(true)} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onShare={() => setShareOpen(true)} onPay={() => setPayOpen(true)} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
@@ -447,6 +451,18 @@ export default function CustomerHome() {
         )}
       </Sheet>
 
+      {trip && trip.payment.method !== 'cash' && (
+        <PayScreen
+          visible={payOpen} title={`Pay ${rs(trip.fare)}`} onClose={() => setPayOpen(false)}
+          start={() => api<PayInit>('POST', `/api/trips/${trip.id}/pay`)}
+          onResult={async (r) => {
+            if (r === 'cancelled') return;
+            if (r !== 'paid') { setErr(r === 'amount_mismatch' ? 'The amount paid did not match the fare. Contact support.' : 'Payment did not go through. Try again.'); return; }
+            setErr('');
+            setTrip(await api<Trip>('GET', `/api/trips/${trip.id}`).catch(() => ({ ...trip, payment: { ...trip.payment, status: 'paid' } })));
+          }}
+        />
+      )}
       {trip && live && (
         <ShareTrip
           visible={shareOpen} onClose={() => setShareOpen(false)} trip={trip} saved={profile?.closeContacts ?? []}
