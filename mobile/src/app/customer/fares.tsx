@@ -26,11 +26,11 @@ export default function Fares() {
             <Txt kind="h2">{rs(row.base)} start + {rs(row.perKm, 1)}/km</Txt>
             <Txt kind="small">Minimum fare {rs(row.minFare)} · fixed price before you book</Txt>
             <View style={[styles.tr, { borderColor: t.line }]}>
-              {['km', 'MyRide', 'Legal max', ...names].map((h) => <Text key={h} style={[styles.th, { color: t.muted }]}>{h}</Text>)}
+              {['km', 'MyRide', 'Legal max', ...names].map((h, i) => <Text key={h} numberOfLines={2} style={[styles.th, i === 0 && styles.km, { color: t.muted }]}>{h}</Text>)}
             </View>
             {row.samples.map((s) => (
               <View key={s.km} style={[styles.tr, { borderColor: t.line }]}>
-                <Text style={[styles.td, { color: t.muted }]}>{s.km}</Text>
+                <Text style={[styles.td, styles.km, { color: t.muted }]}>{s.km}</Text>
                 <Text style={[styles.td, { color: t.ok, fontWeight: '800' }]}>{rs(s.fare)}</Text>
                 <Text style={[styles.td, { color: t.ink }]}>{rs(s.gandakiMax)}</Text>
                 {s.competitors.slice(0, 2).map((c) => <Text key={c.name} style={[styles.td, { color: t.ink }]}>{rs(c.estimate)}</Text>)}
@@ -45,7 +45,8 @@ export default function Fares() {
 }
 
 const styles = StyleSheet.create({
-  tr: { flexDirection: 'row', paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth },
-  th: { flex: 1, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', textAlign: 'right' },
+  tr: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth },
+  th: { flex: 1, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', textAlign: 'right' },
   td: { flex: 1, fontSize: 14, textAlign: 'right' },
+  km: { flex: 0.6 },
 });

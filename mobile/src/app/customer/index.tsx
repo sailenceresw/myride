@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
 import { MapPicker } from '@/components/MapPicker';
@@ -65,6 +65,8 @@ export default function CustomerHome() {
   const [promo, setPromo] = useState(''); // typed code
   const [promoApplied, setPromoApplied] = useState<string | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [note, setNote] = useState(''); // for the rider: "blue gate opposite the school"
+  const [noteOpen, setNoteOpen] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
   const [placesFailed, setPlacesFailed] = useState(false);
   const [quote, setQuote] = useState<QuoteResp | null>(null);
@@ -100,8 +102,9 @@ export default function CustomerHome() {
   useEffect(() => {
     if (!fix || !city || centred.current) return;
     centred.current = true;
+    if (drop || trip) return; // a route is already framed (Book again, a trip in progress): don't pull the map away
     map.current?.flyTo(outside ? city.centre : fix, { zoom: outside ? 13 : 16 });
-  }, [fix, city, outside]);
+  }, [fix, city, outside, drop, trip]);
 
   // Places (landmarks, 33 wards, intercity lanes), the city, any trip still in progress and recent destinations.
   const loadPlaces = useCallback(() => {
@@ -117,6 +120,12 @@ export default function CustomerHome() {
     }).catch(() => {});
   }, []);
   useEffect(() => { loadPlaces(); loadTrips(); }, [loadPlaces, loadTrips]);
+
+  // Links from other screens: "Set Home / Work" (Account) opens that search; "Book again" (Your trips) below.
+  const params = useLocalSearchParams<{ rebook?: string; set?: string }>();
+  const linkSet: SavedKey | null = params.set === 'home' || params.set === 'work' ? params.set : null;
+  const searchMode = searching ?? linkSet;
+  const endLink = () => { if (linkSet) router.setParams({ set: undefined }); };
 
   // Live trip updates arrive over SSE; the slow poll only covers a dropped connection.
   const live = !!trip && ACTIVE.includes(trip.status);
@@ -143,17 +152,37 @@ export default function CustomerHome() {
     setBusy(false);
   }, [weight, promoApplied]);
 
+  // "Book again": the same pickup, destination and kind of trip, freshly quoted. Each link is handled once
+  // (remembered, not cleared: navigating while the app is still starting from the link would crash the router).
+  const rebooked = useRef<string | null>(null);
+  useEffect(() => {
+    const id = params.rebook;
+    if (!id || rebooked.current === id) return;
+    rebooked.current = id;
+    api<Trip>('GET', `/api/trips/${id}`).then((old) => {
+      const k: Kind = old.logistics ? 'logistics' : old.kind === 'delivery' ? 'delivery' : 'ride';
+      setPickup(old.pickup); setDrop(old.drop); setKind(k);
+      getQuote(old.pickup, old.drop, k);
+    }).catch((e) => setErr((e as Error).message));
+  }, [params.rebook, getQuote]);
+
   const geometry = trip?.route.geometry ?? quote?.route.geometry;
   const routeCoords = useMemo(() => geometry?.map(([lat, lng]) => ({ lat, lng })), [geometry]);
-  // Keep the whole route visible above the sheet, whatever its height.
+  // While the rider comes to you, frame the rider and the pickup (re-framed every ~100 m), like Uber.
+  const coming = !!trip && ['accepted', 'arrived'].includes(trip.status) && !!trip.driver?.loc;
+  const driverCell = coming ? `${trip!.driver!.loc!.lat.toFixed(3)},${trip!.driver!.loc!.lng.toFixed(3)}` : null;
+  // Otherwise keep the whole route visible above the sheet, whatever its height.
   useEffect(() => {
-    if (routeCoords) map.current?.fit(routeCoords, { top: insets.top + 80, right: 48, bottom: sheetH + 24, left: 48 });
-  }, [routeCoords, sheetH, insets.top]);
+    // Room for the pin labels (they stand ~70 px above their pins and can be ~200 px wide) and the top buttons.
+    const pad = { top: insets.top + 150, right: 80, bottom: sheetH + 30, left: 80 };
+    if (coming && trip) map.current?.fit([trip.driver!.loc!, trip.pickup], pad);
+    else if (routeCoords) map.current?.fit(routeCoords, pad);
+  }, [routeCoords, sheetH, insets.top, driverCell]); // eslint-disable-line react-hooks/exhaustive-deps -- driverCell stands for the rider's position
 
   const quick = useMemo(() => places.filter((p) => p.id in QUICK), [places]);
 
-  function choose(p: Point | null, field = searching) { // null = back to current location
-    if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: SAVED[field][0] }); setSearching(null); return; }
+  function choose(p: Point | null, field = searchMode) { // null = back to current location
+    if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: p.label && p.label !== 'Current location' ? p.label : SAVED[field][0] }); setSearching(null); endLink(); return; }
     const nextPickup = field === 'pickup' ? p ?? here : pickup;
     const nextDrop = field === 'drop' ? p : drop;
     if (field === 'pickup') setPickup(p); else setDrop(p);
@@ -165,7 +194,7 @@ export default function CustomerHome() {
     if (pickup && drop) getQuote(pickup, drop, k);
   }
   const clearDrop = () => { setDrop(null); setQuote(null); setErr(''); if (fix) map.current?.flyTo(fix, { zoom: 16 }); };
-  const closeSearch = useCallback(() => setSearching(null), []);
+  const closeSearch = () => { setSearching(null); endLink(); };
 
   async function book() {
     if (!pickup || !drop || !sel) return;
@@ -173,9 +202,9 @@ export default function CustomerHome() {
     try {
       const goods = kind === 'ride' ? {} : { parcel: { weightKg: +weight || 1 }, recipient: receiver };
       const scheduledAt = when ? new Date(when).toISOString() : undefined;
-      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, scheduledAt, ...goods }));
+      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, scheduledAt, note: note.trim() || undefined, ...goods }));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      setQuote(null); setWhen(null); setWhenOpen(false);
+      setQuote(null); setWhen(null); setWhenOpen(false); setNote(''); setNoteOpen(false);
     } catch (e) { setErr((e as Error).message); }
     setBusy(false);
   }
@@ -184,9 +213,15 @@ export default function CustomerHome() {
     setErr('');
     try { setTrip(await api<Trip>('POST', `/api/trips/${trip!.id}/${path}`, body)); } catch (e) { setErr((e as Error).message); }
   };
-  const rate = async (stars: number) => {
+  // Uber asks before cancelling: a stray tap must not cancel a ride (and may cost a fee once the rider has waited).
+  const confirmCancel = () => Alert.alert(
+    'Cancel this trip?',
+    trip?.status === 'arrived' ? 'Your rider is waiting at the pickup. A cancellation fee may apply.' : trip?.driver ? `${trip.driver.name.split(' ')[0]} is already on the way.` : 'We are still finding you a rider.',
+    [{ text: 'Keep trip', style: 'cancel' }, { text: 'Cancel trip', style: 'destructive', onPress: () => tripAction('cancel', { reason: 'rider_cancelled' }) }],
+  );
+  const rate = async (stars: number, comment: string) => {
     setErr('');
-    try { await api('POST', `/api/trips/${trip!.id}/rate`, { stars }); setTrip({ ...trip!, riderRating: { stars } }); } catch (e) { setErr(`Rating not saved: ${(e as Error).message}`); }
+    try { await api('POST', `/api/trips/${trip!.id}/rate`, { stars, comment }); setTrip({ ...trip!, riderRating: { stars } }); } catch (e) { setErr(`Rating not saved: ${(e as Error).message}`); }
   };
   const sos = () => { api('POST', `/api/trips/${trip!.id}/sos`, { loc: fix }).catch(() => {}); call(POLICE); }; // always call the police, even if MyRide is unreachable
   const reset = () => { setTrip(null); setDrop(null); setQuote(null); setPromoApplied(null); setErr(''); refresh(); loadTrips(); };
@@ -211,18 +246,18 @@ export default function CustomerHome() {
   }
 
   // ---------- search screen ----------
-  if (searching) {
+  if (searchMode) {
     const shortcuts: Shortcut[] =
-      searching === 'pickup' ? (here ? [{ key: 'here', icon: 'locate', title: 'Use current location', subtitle: 'GPS', onPress: () => choose(null) }] : [])
-        : searching === 'drop' ? [
+      searchMode === 'pickup' ? (here ? [{ key: 'here', icon: 'locate', title: 'Use current location', subtitle: 'GPS', onPress: () => choose(null) }] : [])
+        : searchMode === 'drop' ? [
           ...(Object.keys(SAVED) as SavedKey[]).flatMap((k): Shortcut[] => (saved[k] ? [{ key: k, icon: SAVED[k][1], title: SAVED[k][0], subtitle: 'Saved place', onPress: () => choose(saved[k]!) }] : [])),
           ...recent.map((p): Shortcut => ({ key: `r${p.label}`, icon: 'time-outline', title: p.label!, subtitle: 'Recent', onPress: () => choose(p) })),
         ]
-          : here ? [{ key: 'here', icon: 'locate', title: 'Use my current location', subtitle: `Save as ${SAVED[searching][0]}`, onPress: () => choose(here) }] : [];
+          : here ? [{ key: 'here', icon: 'locate', title: 'Use my current location', subtitle: `Save as ${SAVED[searchMode][0]}`, onPress: () => choose(here) }] : [];
     return (
       <PlaceSearch
-        title={SEARCH_TITLE[searching]} places={places} kind={kind} near={pickup ?? (outside ? city?.centre ?? null : here)} shortcuts={shortcuts}
-        onPick={(p) => choose(asPoint(p))} onMap={() => { setPicking(searching); setSearching(null); }}
+        title={SEARCH_TITLE[searchMode]} places={places} kind={kind} near={pickup ?? (outside ? city?.centre ?? null : here)} shortcuts={shortcuts}
+        onPick={(p) => choose(asPoint(p))} onMap={() => { setPicking(searchMode); setSearching(null); endLink(); }}
         onClose={closeSearch} failed={placesFailed} onRetry={loadPlaces}
       />
     );
@@ -267,9 +302,13 @@ export default function CustomerHome() {
               </Row>
             )}
             {whenOpen && schedulePicker}
+            {noteOpen && (
+              <TextInput autoFocus value={note} onChangeText={setNote} maxLength={140} placeholder="Note for your rider, e.g. blue gate opposite the school" placeholderTextColor={t.muted} onSubmitEditing={() => setNoteOpen(false)} returnKeyType="done" style={input} />
+            )}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               <Chip label={when ? clock(when) : 'Now'} icon="time-outline" active={!!when} onPress={() => setWhenOpen(!whenOpen)} />
               {(Object.keys(PAYMENTS) as (keyof typeof PAYMENTS)[]).map((p) => <Chip key={p} label={PAYMENTS[p][0]} icon={PAYMENTS[p][1]} active={payment === p} onPress={() => setPayment(p)} />)}
+              <Chip label={note.trim() ? 'Note added' : 'Note'} icon={note.trim() ? 'checkmark-circle' : 'chatbox-ellipses-outline'} active={!!note.trim()} onPress={() => setNoteOpen(!noteOpen)} />
               <Chip label={promoApplied ?? 'Promo'} icon={promoApplied ? 'checkmark-circle' : 'pricetag-outline'} active={!!promoApplied} onPress={() => setPromoOpen(!promoOpen)} />
             </ScrollView>
             <Button title={`${when ? 'Schedule' : 'Book'} ${selected.label.replace('MyRide ', '')} · ${selected.total === 0 ? 'FREE' : rs(selected.total)}`} onPress={book} loading={busy} kind="dark" />
@@ -277,7 +316,7 @@ export default function CustomerHome() {
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} err={err} onCancel={() => tripAction('cancel', { reason: 'rider_cancelled' })} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
@@ -334,7 +373,7 @@ export default function CustomerHome() {
               <>
                 <View style={[styles.route, { backgroundColor: t.chip }]}>
                   <View style={{ alignItems: 'center', gap: 3 }}>
-                    <View style={[styles.dot, { backgroundColor: t.brand }]} /><View style={{ width: 2, height: 18, backgroundColor: t.line }} /><View style={[styles.dot, { backgroundColor: t.accent, borderRadius: 2 }]} />
+                    <View style={[styles.dot, { backgroundColor: t.ink }]} /><View style={{ width: 2, height: 18, backgroundColor: t.line }} /><View style={[styles.dot, { backgroundColor: t.ink, borderRadius: 2 }]} />
                   </View>
                   <View style={{ flex: 1, gap: 14 }}>
                     <Pressable onPress={() => setSearching('pickup')}><Txt numberOfLines={1}>{pickup?.label ?? 'Locating you…'}</Txt></Pressable>
@@ -342,7 +381,7 @@ export default function CustomerHome() {
                   </View>
                   <Pressable onPress={clearDrop} hitSlop={10} accessibilityLabel="Clear destination"><Icon name="close" size={22} color={t.muted} /></Pressable>
                 </View>
-                {!!quote && <Txt kind="small" style={{ marginVertical: 6 }}>{quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min{quote.pickupWard ? ` · ${quote.pickupWard}` : ''}{quote.dropWard ? ` → ${quote.dropWard}` : ''}</Txt>}
+                {!!quote && <Txt kind="small" style={{ marginVertical: 6 }}>{quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min{quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}</Txt>}
 
                 {kind !== 'ride' && (
                   <View style={{ gap: 8, marginVertical: 6 }}>
@@ -356,7 +395,7 @@ export default function CustomerHome() {
                 )}
 
                 {busy && !quote && <Txt kind="muted" style={{ marginVertical: 12 }}>Finding the best fares…</Txt>}
-                {quote?.quotes.map((q) => <QuoteRow key={q.service} q={q} selected={q.service === sel} recommended={quote.recommend === q.service} onPress={() => !q.unavailable && setSel(q.service)} />)}
+                {quote?.quotes.map((q) => <QuoteRow key={q.service} q={q} selected={q.service === sel} recommended={quote.recommend === q.service} scheduled={!!when} onPress={() => !q.unavailable && setSel(q.service)} />)}
               </>
             )}
             {!!err && <Row style={{ marginVertical: 6 }}><Icon name="alert-circle" size={18} color={t.danger} /><Text style={{ color: t.danger, flex: 1 }}>{err}</Text></Row>}

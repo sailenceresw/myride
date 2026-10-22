@@ -1,8 +1,10 @@
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import { Avatar, Button, Card, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
-import { apiUrlFor, rs, type Trip } from '@/lib/api';
+import { useState } from 'react';
+import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
+import { apiUrlFor, rs, type Point, type Trip } from '@/lib/api';
 import { call } from '@/lib/config';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
+import { useNow } from '@/lib/useNow';
 
 // On screen, "rider" is the person driving (see mobile/AGENTS.md).
 const STATUS: Record<string, string> = {
@@ -10,19 +12,35 @@ const STATUS: Record<string, string> = {
   completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No riders available right now', scheduled: 'Scheduled',
 };
 const STEP_OF: Record<string, number> = { searching: 0, accepted: 1, arrived: 2, in_progress: 3 };
+const PRAISE = ['Great driving', 'On time', 'Friendly', 'Clean vehicle', 'Knew the way', 'Safe helmet'];
+const PROBLEMS = ['Late pickup', 'Unsafe driving', 'Rude', 'Took a longer route', 'Dirty vehicle', 'Asked for more money'];
 
-/** The customer's current trip: status, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip: Trip; err: string; onCancel: () => void; onRate: (s: number) => void; onSos: () => void; onDone: () => void }) {
+// Road minutes between two points at Pokhara traffic speed (straight line × 1.33 detour, 22 km/h), never under 1.
+const roadMin = (a: Point, b: Point) => {
+  const r = (x: number) => (x * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return Math.max(1, Math.round(((12742 * Math.asin(Math.sqrt(h)) * 1.33) / 22) * 60));
+};
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+/** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
+export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip: Trip; err: string; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void }) {
   const t = useTheme();
+  const now = useNow();
   const d = trip.driver;
   const is = (...s: string[]) => s.includes(trip.status);
-  const live = is('accepted', 'arrived', 'in_progress');
+  const live =is('accepted', 'arrived', 'in_progress');
   const share = () => Share.share({ message: `Track my MyRide trip live: ${apiUrlFor(`/track.html?t=${trip.shareToken}`)}` });
+  // Live ETA from the rider's position, like Uber's "Arriving in 3 min" / "Arrive by 4:32 PM".
+  const headline = is('accepted') && d?.loc ? `Arriving in ${roadMin(d.loc, trip.pickup)} min`
+    : is('in_progress') && d?.loc ? `Arrive by ${clock(now + roadMin(d.loc, trip.drop) * 60000)}`
+      : STATUS[trip.status] ?? trip.status;
   return (
-    <ScrollView showsVerticalScrollIndicator={false}>
+    <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <Row style={{ justifyContent: 'space-between' }}>
         <View style={{ flex: 1 }}>
-          <Txt kind="h1">{STATUS[trip.status] ?? trip.status}</Txt>
+          <Txt kind="h1">{headline}</Txt>
+          {headline !== STATUS[trip.status] && <Txt style={{ fontWeight: '700' }}>{STATUS[trip.status]}</Txt>}
           <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
         </View>
         {is('searching') && <Pulse size={52} color={t.brand}><View style={[styles.pulseCore, { backgroundColor: t.brand }]}><Text style={{ fontSize: 22 }}>{vehicleEmoji(trip.service)}</Text></View></Pulse>}
@@ -75,16 +93,7 @@ export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip
             <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginVertical: 8 }} />
             <Row style={{ justifyContent: 'space-between' }}><Txt style={{ fontWeight: '800' }}>Total · {trip.payment.method}</Txt><Txt kind="price" style={{ color: trip.fare === 0 ? t.ok : t.ink }}>{trip.fare === 0 ? 'FREE' : rs(trip.fare)}</Txt></Row>
           </Card>
-          <View style={{ alignItems: 'center', marginTop: 8 }}>
-            <Txt kind="muted">{trip.riderRating ? 'Thanks for rating!' : `How was your trip with ${d?.name.split(' ')[0] ?? 'your rider'}?`}</Txt>
-            <Row style={{ marginVertical: 4, gap: 6 }}>
-              {[1, 2, 3, 4, 5].map((s) => (
-                <Pressable key={s} disabled={!!trip.riderRating} onPress={() => onRate(s)} accessibilityLabel={`${s} stars`} hitSlop={4}>
-                  <Icon name={(trip.riderRating?.stars ?? 0) >= s ? 'star' : 'star-outline'} size={36} color={(trip.riderRating?.stars ?? 0) >= s ? t.accent : t.line} />
-                </Pressable>
-              ))}
-            </Row>
-          </View>
+          <Rating trip={trip} onRate={onRate} />
         </>
       )}
 
@@ -92,6 +101,39 @@ export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip
       {is('searching', 'accepted', 'arrived', 'scheduled') && <Button title="Cancel trip" kind="ghost" onPress={onCancel} style={{ marginTop: 12 }} />}
       {is('completed', 'cancelled', 'no_driver') && <Button title={is('completed') ? 'Done' : 'Book again'} onPress={onDone} style={{ marginTop: 10 }} />}
     </ScrollView>
+  );
+}
+
+/** Stars first, then what went well (or wrong) and an optional comment; nothing is sent until "Submit". */
+function Rating({ trip, onRate }: { trip: Trip; onRate: (s: number, comment: string) => void }) {
+  const t = useTheme();
+  const [stars, setStars] = useState(0);
+  const [tags, setTags] = useState<string[]>([]);
+  const [text, setText] = useState('');
+  const done = trip.riderRating?.stars;
+  const shown = done ?? stars;
+  const first = trip.driver?.name.split(' ')[0] ?? 'your rider';
+  const options = stars >= 4 ? PRAISE : PROBLEMS;
+  const toggle = (x: string) => setTags(tags.includes(x) ? tags.filter((y) => y !== x) : [...tags, x]);
+  return (
+    <View style={{ alignItems: 'center', marginTop: 8, gap: 6 }}>
+      <Txt style={{ fontWeight: '700' }}>{done ? 'Thanks for rating!' : `How was your trip with ${first}?`}</Txt>
+      <Row style={{ gap: 6 }}>
+        {[1, 2, 3, 4, 5].map((s) => (
+          <Pressable key={s} disabled={!!done} onPress={() => { setStars(s); if ((s >= 4) !== (stars >= 4)) setTags([]); }} accessibilityLabel={`${s} stars`} hitSlop={4}>
+            <Icon name={shown >= s ? 'star' : 'star-outline'} size={38} color={shown >= s ? t.accent : t.line} />
+          </Pressable>
+        ))}
+      </Row>
+      {!done && stars > 0 && (
+        <>
+          <Txt kind="small">{stars >= 4 ? 'What went well?' : 'What went wrong?'}</Txt>
+          <Row style={{ flexWrap: 'wrap', justifyContent: 'center' }}>{options.map((o) => <Chip key={o} label={o} active={tags.includes(o)} onPress={() => toggle(o)} />)}</Row>
+          <TextInput value={text} onChangeText={setText} maxLength={200} placeholder="Add a comment (optional)" placeholderTextColor={t.muted} style={[styles.comment, { borderColor: t.line, color: t.ink, backgroundColor: t.bg }]} />
+          <Button title="Submit rating" kind="dark" onPress={() => onRate(stars, [...tags, text.trim()].filter(Boolean).join('. '))} style={{ alignSelf: 'stretch' }} />
+        </>
+      )}
+    </View>
   );
 }
 
@@ -120,4 +162,5 @@ const styles = StyleSheet.create({
   action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
   pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  comment: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
 });
