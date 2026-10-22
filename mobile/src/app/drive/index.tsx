@@ -11,6 +11,7 @@ import { Avatar, Button, Card, Hero, Icon, ListRow, Pill, Pulse, RoundButton, Ro
 import { api, ApiError, rs, type DriverTrip } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { call } from '@/lib/config';
+import { callOnTrip } from '@/lib/tripCall';
 import { shadow, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useLocation } from '@/lib/useLocation';
 import { useEvents } from '@/lib/useEvents';
@@ -186,7 +187,7 @@ export default function DriverHome() {
   const chatModal = trip && (
     <TripChat
       visible={chat.visible} onClose={chat.close} tripId={trip.id} me="driver" open={ON_TRIP.includes(trip.status)}
-      name={trip.riderName} subtitle={`${trip.pickup.label} → ${trip.drop.label}`} phone={trip.riderPhone}
+      name={trip.riderName} subtitle={`${trip.pickup.label} → ${trip.drop.label}`}
       messages={chat.messages} onSent={chat.sent}
       quickReplies={trip.status === 'accepted' ? ["I'm on my way", '2 minutes away', "I can't find you, please call", 'Okay 👍'] : ["I've arrived", 'I am waiting at the pickup', 'Okay 👍']}
     />
@@ -220,7 +221,7 @@ export default function DriverHome() {
                 <Txt kind="small">{rs(trip.fare)} · {trip.payment}{trip.parcel ? ` · ${trip.parcel.weightKg} kg${trip.parcel.codAmount ? ` · collect COD ${rs(trip.parcel.codAmount)}` : ''}` : ''}</Txt>
               </View>
               {!delivering && <ChatButton unread={chat.unread} onPress={chat.open} />}
-              <RoundButton icon="call" label="Call" color={t.brand} onPress={() => call(delivering ? trip.recipient?.phone : trip.riderPhone)} size={44} />
+              <RoundButton icon="call" label="Call" color={t.brand} onPress={() => (delivering ? call(trip.recipient?.phone) : callOnTrip(trip.id))} size={44} />
             </Row>
             {delivering && (
               <Row>
@@ -286,7 +287,7 @@ export default function DriverHome() {
               <Button title="Start trip" icon="play" onPress={() => act('start', { pin })} loading={busy} disabled={pin.length !== 4} />
               <Row style={{ marginTop: 8 }}>
                 <Button title={chat.unread ? `Messages (${chat.unread})` : 'Message'} icon="chatbubble-ellipses-outline" kind="soft" onPress={chat.open} style={{ flex: 1 }} />
-                {trip.riderPhone && <Button title="Call" icon="call-outline" kind="ghost" onPress={() => call(trip.riderPhone)} style={{ flex: 1 }} />}
+                <Button title="Call" icon="call-outline" kind="ghost" onPress={() => callOnTrip(trip.id)} style={{ flex: 1 }} />
               </Row>
             </>
           ) : offers[0] ? (

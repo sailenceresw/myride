@@ -456,7 +456,7 @@ export default function CustomerHome() {
       {trip?.driver && (
         <TripChat
           visible={chat.visible} onClose={chat.close} tripId={trip.id} me="rider" open={chatOpen}
-          name={trip.driver.name} subtitle={`${trip.driver.vehicle.model} · ${trip.driver.vehicle.plate}`} phone={trip.driver.phone}
+          name={trip.driver.name} subtitle={`${trip.driver.vehicle.model} · ${trip.driver.vehicle.plate}`}
           messages={chat.messages} onSent={chat.sent}
           quickReplies={trip.status === 'in_progress' ? ['Please slow down', 'Stop here, please', 'Thank you!'] : ["I'm at the pickup", "I'll be there in 2 min", 'Where are you?', 'Please wait a moment', 'Okay 👍']}
         />
