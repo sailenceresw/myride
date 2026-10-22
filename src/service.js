@@ -961,7 +961,8 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return store.all('drivers')
       .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
       .slice(0, 25)
-      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
+      // key: a stable anonymous id per vehicle (hash, not the driver id), so the map can glide each car instead of jumping.
+      .map((d) => ({ key: crypto.createHash('sha256').update(`nearby:${d.id}`).digest('hex').slice(0, 10), lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
   }
 
   function stats() {

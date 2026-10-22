@@ -502,11 +502,18 @@ test('navigation endpoint returns a polyline and turn-by-turn steps; needs a ses
 });
 
 test('nearby cars: anonymous, rounded positions of idle online drivers within 3 km', async () => {
+  // An idle online rider just north of Lakeside (set directly: going online may first ask for a routine selfie).
+  const d = svc.driverOf(store.all('users').find((u) => u.phone === '9856000002'));
+  Object.assign(d, { online: true, status: 'idle', currentTripId: null, offerTripId: null, suspended: null, loc: { lat: P('lakeside').lat + 0.001, lng: P('lakeside').lng } });
   const r = (await api('GET', `/api/nearby?lat=${P('lakeside').lat}&lng=${P('lakeside').lng}`)).body;
-  assert.ok(Array.isArray(r));
+  assert.ok(r.length >= 1, 'an online rider near Lakeside is listed');
+  const driverIds = store.all('drivers').map((d) => d.id);
   for (const c of r) {
-    assert.deepEqual(Object.keys(c).sort(), ['ev', 'lat', 'lng', 'type']);
+    assert.deepEqual(Object.keys(c).sort(), ['ev', 'heading', 'key', 'lat', 'lng', 'type']);
     assert.equal(Math.round(c.lat * 1000), c.lat * 1000);
+    assert.ok(!driverIds.some((id) => c.key.includes(id) || id.includes(c.key)), 'the key is not the driver id');
   }
+  const again = (await api('GET', `/api/nearby?lat=${P('lakeside').lat}&lng=${P('lakeside').lng}`)).body;
+  assert.deepEqual(again.map((c) => c.key).sort(), r.map((c) => c.key).sort(), 'stable between polls (cars glide)');
   assert.equal((await api('GET', '/api/nearby?lat=x')).status, 400);
 });
