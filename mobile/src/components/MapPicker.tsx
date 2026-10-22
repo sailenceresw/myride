@@ -1,3 +1,4 @@
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,6 +43,7 @@ export function MapPicker({ title, start, user, inCityOnly, confirmLabel, onConf
   const ready = !!addr && !moving && !outside;
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <StatusBar style="auto" />
       <View style={{ flex: 1 }}>
         <AppMap ref={map} user={user} onUserPan={() => setMoving(true)} onIdle={idle} />
         {/* The pin: lifts while the map moves, its tip marks the map's centre. */}
