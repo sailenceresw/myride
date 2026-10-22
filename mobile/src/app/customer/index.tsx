@@ -436,7 +436,7 @@ export default function CustomerHome() {
                   <Txt kind="small" style={{ marginVertical: 6 }} numberOfLines={2}>
                     {quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min
                     {stops.length
-                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, keep each about 2 min`
+                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, waiting over 3 min at a stop is charged`
                       : quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}
                   </Txt>
                 )}

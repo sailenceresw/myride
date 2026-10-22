@@ -393,7 +393,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const employee = driver?.driverType === 'employee';
     return {
       id: trip.id, kind: trip.kind, logistics: trip.logistics, service: trip.service, status: trip.status,
-      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
+      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, stopArrivedAt: trip.stopArrivedAt || null, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
       fare: trip.fare,
       earning: employee ? null : trip.quote.split.driver, // fleet employees are paid wages, not per trip
       employee,
@@ -413,6 +413,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return {
       ...rest,
       deliveryOtp: trip.kind === 'delivery' ? deliveryOtp : undefined, // sender shares it with the recipient
+      waitRule: { freeMin: SERVICES[trip.service].waitFreeMin, perMin: SERVICES[trip.service].waitPerMin }, // pickup and each stop
       // No phone number: calls go through POST /api/trips/:id/call (masked when a call bridge is configured).
       driver: d ? { id: d.id, name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
     };
@@ -888,11 +889,27 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return t;
   }
 
-  /** Driver: done at the current stop, on to the next one (or the destination). */
+  /** Driver: arrived at the current stop (starts the stop's waiting clock; the customer sees it). */
+  function stopArrived(user, id) {
+    const { t } = ownTrip(user, id);
+    if (t.status !== 'in_progress') fail(409, 'Start the trip first');
+    if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    if (!t.stopArrivedAt) {
+      t.stopArrivedAt = now();
+      t.events.push({ at: now(), status: 'in_progress', note: `stop_${(t.stopsDone || 0) + 1}_arrived` });
+      store.save();
+      emitTrip(t);
+    }
+    return t;
+  }
+
+  /** Driver: done at the current stop, on to the next one (or the destination). Time waited there is recorded. */
   function nextStop(user, id) {
     const { t } = ownTrip(user, id);
     if (t.status !== 'in_progress') fail(409, 'Start the trip first');
     if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    t.stopWaits = [...(t.stopWaits || []), t.stopArrivedAt ? (now() - t.stopArrivedAt) / 60000 : 0];
+    t.stopArrivedAt = null;
     t.stopsDone = (t.stopsDone || 0) + 1;
     t.events.push({ at: now(), status: 'in_progress', note: `stop_${t.stopsDone}_done` });
     store.save();
@@ -911,7 +928,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const rider = store.get('users', t.riderId);
     // Final fare includes waiting time; discounts are re-applied to the final amount (credits re-checked).
     const requested = (t.discountsRequested || []).map((x) => (x.kind === 'credit' ? { ...x, amount: rider.credits || 0 } : x));
-    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, waiveCod: t.riderMember });
+    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, stopWaits: t.stopWaits, waiveCod: t.riderMember });
     const final = applyDiscounts(base, requested);
     t.quote = final;
     t.fare = final.total + (t.dues || 0);
@@ -1019,7 +1036,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, messages, sendMessage, callInfo, bridgeLookup, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, callInfo, bridgeLookup, stopArrived, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }

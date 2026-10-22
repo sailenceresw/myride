@@ -330,6 +330,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/driver/offers', driver, (req, res) => res.json(svc.offersFor(req.user)));
   app.post('/api/trips/:id/accept', driver, wrap((req) => svc.driverView(svc.acceptTrip(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/arrived', driver, wrap((req) => svc.driverView(svc.arrived(req.user, req.params.id), svc.driverOf(req.user))));
+  app.post('/api/trips/:id/stop-arrived', driver, wrap((req) => svc.driverView(svc.stopArrived(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/next-stop', driver, wrap((req) => svc.driverView(svc.nextStop(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/start', driver, wrap((req) => svc.driverView(svc.startTrip(req.user, req.params.id, req.body.pin), svc.driverOf(req.user))));
   app.post('/api/trips/:id/complete', driver, wrap(async (req) => svc.driverView(await svc.completeTrip(req.user, req.params.id, req.body), svc.driverOf(req.user))));
