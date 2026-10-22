@@ -175,6 +175,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   // ---------- rider: profile, membership, referral ----------
   app.get('/api/profile', rider, (req, res) => res.json(svc.profile(req.user)));
   app.patch('/api/profile', rider, wrap((req) => svc.updateProfile(req.user, req.body)));
+  app.delete('/api/profile', rider, wrap((req) => svc.deleteAccount(req.user))); // store rule: delete your account in the app
   app.post('/api/profile/referral', rider, wrap((req) => svc.applyReferral(req.user, req.body.code)));
   app.post('/api/membership/trial', rider, wrap((req) => svc.startTrial(req.user, req.body.plan)));
   app.post('/api/membership/cancel', rider, wrap((req) => svc.cancelMembership(req.user)));

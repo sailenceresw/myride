@@ -213,6 +213,22 @@ test('stops: up to 2 on the way, priced on the whole route; the rider marks each
   assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
 });
 
+test('account deletion: personal data removed, signed out everywhere, trips kept without the person', async () => {
+  const me = await login('9846000077', 'Sita Delete');
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash', note: 'by the blue gate' }, me.token)).body;
+  assert.equal((await api('DELETE', '/api/profile', null, me.token)).status, 409, 'not during a trip');
+  await api('POST', `/api/trips/${t.id}/cancel`, {}, me.token);
+  assert.equal((await api('DELETE', '/api/profile', null, bikeDrv.token)).status, 403, 'rider (driver) accounts use the Drive portal / support');
+  const del = await api("DELETE", "/api/profile", null, me.token);
+  assert.equal(del.body.deleted, true, JSON.stringify(del.body));
+  assert.equal((await api('GET', '/api/profile', null, me.token)).status, 401, 'signed out');
+  const kept = store.get('trips', t.id);
+  assert.deepEqual([kept.riderName, kept.riderPhone, kept.note], ['Deleted user', null, undefined]);
+  assert.equal(store.all('users').some((u) => u.phone === '9846000077'), false, 'number freed');
+  const again = await login('9846000077', 'Sita New');
+  assert.notEqual(again.user.id, me.user.id, 'signing up again makes a fresh account');
+});
+
 test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
   const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');

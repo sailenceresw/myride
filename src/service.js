@@ -167,6 +167,31 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
   function cancelMembership(user) { rewards.cancelAutoRenew(user); store.save(); return profile(user); }
 
+  /**
+   * Delete a customer account (Google Play / App Store requirement): personal data removed, signed out everywhere.
+   * Trip records stay for accounting and safety, without the person's name, number, notes, chats or contacts.
+   * Riders (drivers) close their account through support: payouts, tax and KYC records must be settled first.
+   */
+  function deleteAccount(user) {
+    if (driverOf(user)) fail(409, 'You are also a MyRide rider. Please contact MyRide support to close your rider account (payouts and records).');
+    if (store.all('trips').some((t) => t.riderId === user.id && (ACTIVE.includes(t.status) || t.status === 'scheduled'))) fail(409, 'Finish or cancel your current or scheduled trip first');
+    const mine = store.all('trips').filter((t) => t.riderId === user.id);
+    const ids = new Set(mine.map((t) => t.id));
+    for (const t of mine) {
+      Object.assign(t, { riderName: 'Deleted user', riderPhone: null, note: undefined, sharedWith: undefined, business: null });
+      if (t.recipient) t.recipient = { name: 'Recipient' };
+    }
+    for (const m of store.all('messages')) if (ids.has(m.tripId)) delete store.db.messages[m.id];
+    for (const [token, s] of Object.entries(store.db.sessions)) if (s.userId === user.id) delete store.db.sessions[token];
+    if (user.membership) rewards.cancelAutoRenew(user); // stop Plus renewing
+    Object.assign(user, {
+      name: 'Deleted user', phone: `deleted:${user.id}`, email: '', business: null, closeContacts: [], pushTokens: [],
+      deletedAt: now(), roles: user.roles.filter((r) => r !== 'admin'),
+    });
+    store.save();
+    return { deleted: true };
+  }
+
   // ---------- quotes ----------
   function checkPoints(svc, pickup, drop) {
     if (!isValidPoint(pickup) || !isValidPoint(drop)) fail(400, 'Pickup and drop need lat/lng');
@@ -988,7 +1013,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   return {
-    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, applyReferral,
+    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, deleteAccount, applyReferral,
     createMembershipOrder, startTrial, markOrderPaid, cancelMembership,
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
