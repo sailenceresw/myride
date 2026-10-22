@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pre
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar, BackHeader, Chip, Icon, RoundButton, Row, Txt } from '@/components/ui';
 import { api, type ChatMessage } from '@/lib/api';
-import { call } from '@/lib/config';
+import { callOnTrip } from '@/lib/tripCall';
 import { RADIUS, useTheme } from '@/lib/theme';
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -12,8 +12,8 @@ const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeri
  * In-trip chat between the customer and the rider (both apps). The parent owns the message list (it also
  * receives live messages while the chat is closed, for the unread badge); this screen shows and sends.
  */
-export function TripChat({ visible, onClose, tripId, me, name, subtitle, phone, messages, onSent, quickReplies, open }: {
-  visible: boolean; onClose: () => void; tripId: string; me: 'rider' | 'driver'; name: string; subtitle?: string; phone?: string;
+export function TripChat({ visible, onClose, tripId, me, name, subtitle, messages, onSent, quickReplies, open }: {
+  visible: boolean; onClose: () => void; tripId: string; me: 'rider' | 'driver'; name: string; subtitle?: string;
   messages: ChatMessage[]; onSent: (m: ChatMessage) => void; quickReplies: string[]; open: boolean; // open = the trip still allows messages
 }) {
   const t = useTheme();
@@ -43,7 +43,7 @@ export function TripChat({ visible, onClose, tripId, me, name, subtitle, phone, 
               <Txt style={{ fontWeight: '800' }} numberOfLines={1}>{name}</Txt>
               {!!subtitle && <Txt kind="small" numberOfLines={1}>{subtitle}</Txt>}
             </View>
-            {!!phone && <RoundButton icon="call" label={`Call ${name}`} onPress={() => call(phone)} size={42} />}
+            {open && <RoundButton icon="call" label={`Call ${name}`} onPress={() => callOnTrip(tripId)} size={42} />}
           </Row>
 
           <FlatList

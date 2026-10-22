@@ -226,10 +226,29 @@ test('chat: customer and rider can message only while the trip is on; others can
   assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, outsider.token)).status, 403);
   const thread = (await api('GET', `/api/trips/${t.id}/messages`, null, bikeDrv.token)).body;
   assert.deepEqual(thread.map((m) => m.from), ['rider', 'driver']);
+
+  // Phone numbers are private: never in trip data; calls ask the server, only during the trip.
+  const asRider = (await api('GET', `/api/trips/${t.id}`, null, rider.token)).body;
+  const asDriver = (await api('GET', `/api/trips/${t.id}`, null, bikeDrv.token)).body;
+  assert.equal(asRider.driver.phone, undefined, "the customer's view has no rider number");
+  assert.equal(JSON.stringify(asDriver).includes('9846000001'), false, "the rider's view has no customer number");
+  const dial = (await api('POST', `/api/trips/${t.id}/call`, {}, rider.token)).body;
+  assert.deepEqual([dial.masked, dial.dial], [false, '9856000002'], 'without a bridge: the number for this call only');
+  process.env.CALL_BRIDGE_NUMBER = '014000000'; process.env.CALL_BRIDGE_SECRET = 's3cret';
+  const masked = (await api('POST', `/api/trips/${t.id}/call`, {}, bikeDrv.token)).body;
+  assert.equal(masked.masked, true);
+  assert.equal(masked.dial, '014000000', 'with a bridge: MyRide number + trip code, no personal number');
+  const bridge = (body, secret = 's3cret') => fetch(`${base}/api/call-bridge/lookup`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-bridge-secret': secret }, body: JSON.stringify(body) });
+  assert.equal((await bridge({ code: masked.code, caller: '9856000002' }, 'wrong')).status, 401);
+  assert.equal((await (await bridge({ code: masked.code, caller: '+977 9856000002' })).json()).connect, '9846000001');
+  assert.equal((await bridge({ code: masked.code, caller: '9800000099' })).status, 404, 'strangers with the code are not connected');
+  delete process.env.CALL_BRIDGE_NUMBER; delete process.env.CALL_BRIDGE_SECRET;
+  assert.equal((await api('POST', `/api/trips/${t.id}/call`, {}, outsider.token)).status, 403);
   await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'thanks!' }, rider.token)).status, 409, 'chat closes with the trip');
+  assert.equal((await api('POST', `/api/trips/${t.id}/call`, {}, rider.token)).status, 409, 'and so do calls');
   assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, rider.token)).body.length, 2, 'history stays readable');
 });
 

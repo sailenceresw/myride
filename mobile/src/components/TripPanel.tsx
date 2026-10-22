@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
 import { rs, type Point, type Trip } from '@/lib/api';
-import { call } from '@/lib/config';
+import { callOnTrip } from '@/lib/tripCall';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useNow } from '@/lib/useNow';
 
@@ -85,7 +85,7 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
       {live && d && (
         <Row style={{ marginTop: 10 }}>
           <Action icon="chatbubble-ellipses" label="Message" onPress={onMessage} badge={unread} />
-          <Action icon="call" label="Call" onPress={() => call(d.phone)} />
+          <Action icon="call" label="Call" onPress={() => callOnTrip(trip.id)} />
           <Action icon="share-social" label="Share trip" onPress={onShare} />
           <Action icon="warning" label="SOS" onPress={onSos} danger />
         </Row>
