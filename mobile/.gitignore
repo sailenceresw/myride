@@ -43,3 +43,4 @@ yarn-error.*
 # local AI-tool config
 CLAUDE.md
 .claude/
+/android

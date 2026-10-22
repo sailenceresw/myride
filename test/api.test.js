@@ -433,6 +433,18 @@ test('eSewa trip payment: after the ride the customer pays the exact fare; only 
   assert.equal((await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).status, 409, 'cannot pay twice');
 });
 
+test('crash reports from the apps reach the ops console; flooding is rate-limited', async () => {
+  const r = await api('POST', '/api/client-errors', { app: 'myride', version: '1.0.0', platform: 'android 13', fatal: true, screen: 'render', message: 'TypeError: x is undefined', stack: 'at Home' }, rider.token);
+  assert.equal(r.status, 204);
+  const list = (await api('GET', '/api/admin/client-errors', null, admin.token)).body;
+  assert.deepEqual([list[0].app, list[0].fatal, list[0].message], ['myride', true, 'TypeError: x is undefined']);
+  assert.ok(list[0].userId, 'linked to the signed-in user');
+  assert.equal((await api('GET', '/api/admin/client-errors', null, rider.token)).status, 403, 'ops only');
+  let last;
+  for (let i = 0; i < 25; i++) last = await api('POST', '/api/client-errors', { message: `flood ${i}` });
+  assert.equal(last.status, 429);
+});
+
 test('admin promo creation and economics endpoint (v1 vs v2 bridge, 24-month projection, fleet)', async () => {
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15, maxOff: 40 }, admin.token)).status, 200);
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15 }, admin.token)).status, 409);
