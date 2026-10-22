@@ -247,6 +247,12 @@ test('chat: customer and rider can message only while the trip is on; others can
   const asRider = (await api('GET', `/api/trips/${t.id}`, null, rider.token)).body;
   const asDriver = (await api('GET', `/api/trips/${t.id}`, null, bikeDrv.token)).body;
   assert.equal(asRider.driver.phone, undefined, "the customer's view has no rider number");
+  // The rider's verified photo, for the customer of this trip only.
+  assert.equal(asRider.driver.photo, true);
+  const photo = await fetch(`${base}/api/trips/${t.id}/driver-photo`, { headers: { Authorization: `Bearer ${rider.token}` } });
+  assert.equal(photo.status, 200);
+  assert.match(photo.headers.get('content-type'), /^image\//);
+  assert.equal((await fetch(`${base}/api/trips/${t.id}/driver-photo`, { headers: { Authorization: `Bearer ${outsider.token}` } })).status, 403);
   assert.equal(JSON.stringify(asDriver).includes('9846000001'), false, "the rider's view has no customer number");
   const dial = (await api('POST', `/api/trips/${t.id}/call`, {}, rider.token)).body;
   assert.deepEqual([dial.masked, dial.dial], [false, '9856000002'], 'without a bridge: the number for this call only');

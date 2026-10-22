@@ -54,7 +54,7 @@ export type Trip = {
   quote: Quote & { lines: { label: string; amount: number }[] };
   payment: { method: string; status: string };
   // No phone number: call through callOnTrip(). heading: degrees, for drawing the car.
-  driver: null | { name: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; heading?: number | null; fleet?: boolean };
+  driver: null | { name: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; heading?: number | null; fleet?: boolean; photo?: boolean };
   deliveryOtp?: string; recipient?: { name: string; phone: string }; riderRating?: { stars: number };
   sharedWith?: { name: string; phone: string }[]; // close ones following this trip by SMS
 };

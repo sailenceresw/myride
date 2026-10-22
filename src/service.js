@@ -414,7 +414,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       ...rest,
       deliveryOtp: trip.kind === 'delivery' ? deliveryOtp : undefined, // sender shares it with the recipient
       // No phone number: calls go through POST /api/trips/:id/call (masked when a call bridge is configured).
-      driver: d ? { id: d.id, name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee' } : null,
+      driver: d ? { id: d.id, name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
     };
   }
 
