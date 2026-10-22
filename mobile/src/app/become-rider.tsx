@@ -1,9 +1,10 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SignIn } from '@/components/SignIn';
 import { BackHeader, Button, Card, Hero, ListRow, Row, Txt, type IconName } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { RIDER_GRADIENT, useTheme } from '@/lib/theme';
+import { IS_DRIVE } from '@/lib/config';
+import { DRIVER_GRADIENT, useTheme } from '@/lib/theme';
 
 const WHY: [IconName, string, string][] = [
   ['cash-outline', 'Keep 88–90% of every fare', 'Partners with their own vehicle; MyRide takes 10–12%'],
@@ -24,11 +25,12 @@ export default function BecomeRider() {
   const { token, profile } = useAuth();
   const app = profile?.driverApplication?.status;
   const start = () => router.push('/customer/apply');
+  if (IS_DRIVE) return <Redirect href="/" />; // MyRide Drive has its own application on the driver home
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
-          <Hero colors={RIDER_GRADIENT} style={{ paddingBottom: 48 }}>
+          <Hero colors={DRIVER_GRADIENT} style={{ paddingBottom: 48 }}>
             <BackHeader title="" light />
             <Text style={styles.title}>Earn with MyRide</Text>
             <Text style={styles.sub}>Become a MyRide rider with your motorcycle, car, van or truck, or join the MyRide fleet.</Text>

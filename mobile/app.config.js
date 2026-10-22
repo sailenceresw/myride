@@ -67,6 +67,7 @@ module.exports = ({ config }) => ({
     variant: VARIANT,
     apiUrl: process.env.EXPO_PUBLIC_API_URL || null, // e.g. https://api.myride.com.np in production
     // Push notifications need the EAS project id (`npx eas-cli@latest init` prints it); without it push is skipped.
-    eas: { projectId: (DRIVER ? process.env.EAS_PROJECT_ID_DRIVER : process.env.EAS_PROJECT_ID_RIDER) || undefined },
+    // EAS_PROJECT_ID_RIDER is the old name for the customer app's id (kept so existing EAS secrets still work).
+    eas: { projectId: (DRIVER ? process.env.EAS_PROJECT_ID_DRIVER : process.env.EAS_PROJECT_ID_CUSTOMER || process.env.EAS_PROJECT_ID_RIDER) || undefined },
   },
 });

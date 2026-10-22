@@ -11,12 +11,25 @@ export const getApiToken = () => token;
 /** Absolute URL on the MyRide server (API calls, share links, web pages opened in-app). */
 export const apiUrlFor = (path: string) => `${API_URL}${path}`;
 
+const TIMEOUT_MS = 15000;
+
 export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrlFor(path), {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  // Without a timeout an unreachable server leaves screens spinning forever (fetch never settles on some networks).
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(apiUrlFor(path), {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } catch (e) {
+    throw new Error(abort.signal.aborted ? "Can't reach MyRide. Check your internet connection." : (e as Error).message);
+  } finally {
+    clearTimeout(timer);
+  }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, json.error || `Request failed (${res.status})`, json);
   return json as T;
@@ -34,7 +47,7 @@ export type Quote = {
   split: { driver: number; promoCost: number };
 };
 export type Trip = {
-  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string;
+  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string; scheduledAt?: number | null;
   pickup: Point; drop: Point; route: { km: number; min: number; geometry: [number, number][] };
   quote: Quote & { lines: { label: string; amount: number }[] };
   payment: { method: string; status: string };

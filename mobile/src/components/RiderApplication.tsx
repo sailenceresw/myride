@@ -1,9 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BackHeader, Button, Card, Chip, Icon, ListRow, Pill, Row, Steps, Txt, type IconName } from '@/components/ui';
+import { BackHeader, Button, Card, Chip, goBack, Icon, ListRow, Pill, Row, Steps, Txt, type IconName } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { IS_DRIVE } from '@/lib/config';
 import { RADIUS, useTheme } from '@/lib/theme';
@@ -219,7 +218,7 @@ function Status({ app }: { app: Application }) {
         <Icon name={icon} size={72} color={approved ? t.ok : app.status === 'rejected' ? t.danger : t.accent} />
         <Txt kind="h1" style={{ textAlign: 'center' }}>{title}</Txt>
         <Txt kind="muted" style={{ textAlign: 'center' }}>{text}</Txt>
-        <Button title={IS_DRIVE ? 'Done' : 'Back to booking'} onPress={() => router.back()} style={{ alignSelf: 'stretch', marginTop: 12 }} />
+        <Button title={IS_DRIVE ? 'Done' : 'Back to booking'} onPress={goBack} style={{ alignSelf: 'stretch', marginTop: 12 }} />
       </View>
     </SafeAreaView>
   );
