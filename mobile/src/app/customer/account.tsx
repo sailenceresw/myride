@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, BackHeader, Button, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
@@ -57,6 +58,20 @@ export default function Account() {
     try { await api('PATCH', '/api/profile', { name: n }); await refresh(); setEditing(false); } catch (e) { Alert.alert('Name', (e as Error).message); }
     setBusy(null);
   }
+  // Store rule: delete your account from inside the app. Two steps, because it cannot be undone.
+  const deleteAccount = () => Alert.alert(
+    'Delete your account?',
+    'Your name, number, saved contacts and chats are removed and you are signed out everywhere. Unused credits are lost. Trip records are kept for accounting, without your details. This cannot be undone.',
+    [
+      { text: 'Keep my account', style: 'cancel' },
+      {
+        text: 'Delete account', style: 'destructive',
+        onPress: async () => {
+          try { await api('DELETE', '/api/profile'); Alert.alert('Account deleted', 'Thank you for riding with MyRide.'); await signOut(); } catch (e) { Alert.alert('Delete account', (e as Error).message); }
+        },
+      },
+    ],
+  );
   const invite = () => Share.share({ message: `Ride free on MyRide in Pokhara! Use my code ${profile.referral.code} — your first ride is free (up to Rs 100). ${apiUrlFor(`/?ref=${profile.referral.code}`)}` });
   const setPlace = (k: SavedKey) => router.navigate({ pathname: '/customer', params: { set: k } });
   const s = config?.safety;
@@ -134,6 +149,11 @@ export default function Account() {
             {config?.support?.phone && <ListRow icon="help-buoy-outline" title="Help and support" subtitle={`Call MyRide on ${config.support.phone}`} onPress={() => call(config.support!.phone!)} />}
             <ListRow icon="pricetags-outline" title="Fare chart" subtitle="MyRide fares vs the legal maximum, Pathao and Yango" onPress={() => router.push('/customer/fares')} />
             <ListRow icon="car-sport" title={profile.isDriver ? "You're a MyRide rider" : 'Become a MyRide rider'} subtitle={RIDER_STATUS[profile.isDriver ? 'approved' : profile.driverApplication?.status ?? 'none']} onPress={() => router.push(profile.driverApplication || profile.isDriver ? '/customer/apply' : '/become-rider')} />
+          </Card>
+
+          <Card>
+            <ListRow icon="document-lock-outline" title="Privacy policy" subtitle="What we collect and who can see it" onPress={() => WebBrowser.openBrowserAsync(apiUrlFor('/privacy.html'))} />
+            <ListRow icon="trash-outline" title="Delete account" subtitle="Remove your personal data from MyRide" onPress={deleteAccount} right={<Icon name="chevron-forward" size={18} color={t.danger} />} />
           </Card>
 
           <Button title="Sign out" icon="log-out-outline" kind="ghost" onPress={() => Alert.alert('Sign out?', 'You will need an SMS code to sign in again.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={{ marginTop: 8 }} />
