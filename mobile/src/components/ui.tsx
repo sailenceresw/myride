@@ -51,11 +51,11 @@ export function Card({ children, style, selected, onPress, raised }: { children:
 }
 
 /** Uber-style bottom sheet over the full-screen map. `onHeight` lets the map keep the route clear of it. */
-export function Sheet({ children, onHeight, footer }: { children: ReactNode; onHeight?: (h: number) => void; footer?: ReactNode }) {
+export function Sheet({ children, onHeight, footer, maxHeight }: { children: ReactNode; onHeight?: (h: number) => void; footer?: ReactNode; maxHeight?: `${number}%` }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   return (
-    <View onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={[styles.sheet, shadow(16), { backgroundColor: t.card, paddingBottom: Math.max(insets.bottom, 12) }]}>
+    <View onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={[styles.sheet, shadow(16), { backgroundColor: t.card, paddingBottom: Math.max(insets.bottom, 12) }, maxHeight && { maxHeight }]}>
       <View style={[styles.grabber, { backgroundColor: t.line }]} />
       <View style={{ flexShrink: 1 }}>{children}</View>
       {footer && <View style={[styles.footer, { borderColor: t.line }]}>{footer}</View>}

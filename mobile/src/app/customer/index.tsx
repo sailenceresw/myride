@@ -258,9 +258,10 @@ export default function CustomerHome() {
   const pk = trip?.pickup ?? pickup, dp = trip?.drop ?? drop;
   const vias = trip ? trip.stops ?? [] : stops;
   const markers: MapMarker[] = [
-    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
+    // Nearby vehicles only before a destination is chosen: on the fare screen they would hide the route.
+    ...(trip || drop ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
     ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : short(pk.label === 'Current location' ? 'Pickup' : pk.label) }] : []),
-    ...vias.map((s, i) => ({ key: `stop${i}`, at: s, kind: 'stop' as const, label: `${i + 1} · ${short(s.label)}` })),
+    ...vias.map((s, i) => ({ key: `stop${i}`, at: s, kind: 'stop' as const, badge: String(i + 1) })), // numbered pin, no label: keeps the route visible
     ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: short(dp.label), eta: quote && !trip ? `${Math.round(quote.route.min)} min` : undefined }] : []),
     ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, vehicle: trip.driver.vehicle.type, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
   ];
@@ -322,6 +323,7 @@ export default function CustomerHome() {
 
       <Sheet
         onHeight={setSheetH}
+        maxHeight={drop && !trip ? '56%' : undefined} // choosing a ride: leave the map room for the whole route (the list scrolls)
         footer={!trip && selected ? (
           <>
             {promoOpen && (
@@ -416,8 +418,14 @@ export default function CustomerHome() {
                     </Pressable>
                   )}
                 </View>
-                {!!stops.length && <Txt kind="small" style={{ marginTop: 6 }}>Keep each stop short (about 2 minutes). The fare covers the whole route.</Txt>}
-                {!!quote && <Txt kind="small" style={{ marginVertical: 6 }}>{quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min{quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}</Txt>}
+                {!!quote && (
+                  <Txt kind="small" style={{ marginVertical: 6 }} numberOfLines={2}>
+                    {quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min
+                    {stops.length
+                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, keep each about 2 min`
+                      : quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}
+                  </Txt>
+                )}
 
                 {kind !== 'ride' && (
                   <View style={{ gap: 8, marginVertical: 6 }}>
