@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
-import { rs, type Point, type Trip } from '@/lib/api';
+import { apiUrlFor, getApiToken, rs, type Point, type Trip } from '@/lib/api';
 import { callOnTrip } from '@/lib/tripCall';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useNow } from '@/lib/useNow';
@@ -69,7 +69,10 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onPay, onCanc
       {d && (
         <Card raised style={{ marginTop: 8 }}>
           <Row style={{ gap: 12 }}>
-            <Avatar name={d.name} size={52} />
+            {d.photo
+              // The rider's verified photo, so you can check who is picking you up (only you can load it, during the trip).
+              ? <Image source={{ uri: apiUrlFor(`/api/trips/${trip.id}/driver-photo`), headers: { Authorization: `Bearer ${getApiToken() ?? ''}` } }} style={styles.photo} accessibilityLabel={`Photo of ${d.name}`} />
+              : <Avatar name={d.name} size={52} />}
             <View style={{ flex: 1, gap: 3 }}>
               <Row style={{ gap: 6 }}><Txt style={{ fontWeight: '800' }}>{d.name}</Txt><Icon name="star" size={13} color={t.accent} /><Txt kind="small">{d.rating}</Txt></Row>
               <Txt kind="small">{d.vehicle.model}{d.fleet ? ' · MyRide fleet' : ''}</Txt>
@@ -185,6 +188,7 @@ const styles = StyleSheet.create({
   action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
   pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  photo: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#ddd' },
   badge: { position: 'absolute', top: 6, right: 14, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   comment: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },

@@ -265,6 +265,20 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   }));
 
   // ---------- files (owner or admin only) ----------
+  // The rider's verified photo (KYC selfie), so the customer can check who is picking them up. Only the customer of
+  // this trip, from acceptance until 2 hours after it ends.
+  app.get('/api/trips/:id/driver-photo', rider, wrap((req, res) => {
+    const t = svc.getTripFor(req.user, req.params.id);
+    if (t.riderId !== req.user.id) throw new HttpError(403, 'Not your trip');
+    const ended = ['completed', 'cancelled'].includes(t.status) ? t.events.at(-1).at : null;
+    if (!['accepted', 'arrived', 'in_progress', 'completed'].includes(t.status) || (ended && (now ? now() : Date.now()) - ended > 2 * 3600000)) throw new HttpError(409, 'Photo available during the trip only');
+    const d = t.driverId && store.get('drivers', t.driverId);
+    const f = d?.faceRef && files.read(d.faceRef);
+    if (!f) throw new HttpError(404, 'No photo');
+    res.setHeader('Content-Type', f.rec.mime);
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    res.end(f.buf);
+  }));
   app.get('/api/files/:id', anyAuth, (req, res) => {
     const f = files.read(req.params.id);
     if (!f) return res.status(404).json({ error: 'Not found' });
