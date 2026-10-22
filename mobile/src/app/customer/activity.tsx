@@ -95,6 +95,7 @@ function TripRow({ trip, support }: { trip: Past; support: string | null }) {
             </View>
             <View style={{ flex: 1, gap: 10 }}>
               <Txt numberOfLines={1}>{trip.pickup.label ?? 'Pickup'}</Txt>
+              {trip.stops?.map((s, i) => <Txt key={i} kind="small" numberOfLines={1}>Stop {i + 1}: {s.label}</Txt>)}
               <Txt numberOfLines={1} style={{ fontWeight: '700' }}>{trip.drop.label ?? 'Drop'}</Txt>
             </View>
           </Row>

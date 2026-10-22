@@ -42,11 +42,21 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
         <View style={{ flex: 1 }}>
           <Txt kind="h1">{headline}</Txt>
           {headline !== STATUS[trip.status] && <Txt style={{ fontWeight: '700' }}>{STATUS[trip.status]}</Txt>}
-          <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
+          <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.stops?.length ? `${trip.stops.length} stop${trip.stops.length > 1 ? 's' : ''} → ` : ''}{trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
         </View>
         {is('searching') && <Pulse size={52} color={t.brand}><View style={[styles.pulseCore, { backgroundColor: t.brand }]}><Text style={{ fontSize: 22 }}>{vehicleEmoji(trip.service)}</Text></View></Pulse>}
       </Row>
       {trip.status in STEP_OF && <Steps steps={['Booked', 'Coming', 'Pickup', 'On trip']} at={STEP_OF[trip.status]} />}
+      {is('in_progress') && !!trip.stops?.length && (() => {
+        const done = trip.stopsDone ?? 0;
+        const next = trip.stops[done];
+        return (
+          <Row style={{ marginTop: 6 }}>
+            <Icon name={next ? 'flag-outline' : 'checkmark-done'} size={16} color={t.brand} />
+            <Txt kind="small" style={{ flex: 1 }}>{next ? `Next: stop ${done + 1} of ${trip.stops.length}, ${next.label}` : `Stops done: on to ${trip.drop.label}`}</Txt>
+          </Row>
+        );
+      })()}
       {is('searching') && <Txt kind="small">Offering your trip to the nearest riders…</Txt>}
       {is('scheduled') && !!trip.scheduledAt && (
         <Row style={{ marginTop: 8 }}>

@@ -176,15 +176,43 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     if (haversineKm(pickup, drop) < 0.2) fail(400, 'Pickup and drop are too close');
   }
 
+  // ---------- stops on the way (rides, like Uber: up to 2 before the destination) ----------
+  const MAX_STOPS = 2;
+  const STOP_MIN = 2; // minutes allowed at each stop in the time estimate
+  function cleanStops(svc, stops) {
+    if (stops === undefined || stops === null || (Array.isArray(stops) && !stops.length)) return [];
+    if (!Array.isArray(stops)) fail(400, 'Stops must be a list');
+    if (svc.kind !== 'ride') fail(400, 'Stops are for rides only');
+    if (stops.length > MAX_STOPS) fail(400, `You can add up to ${MAX_STOPS} stops`);
+    return stops.map((s, i) => {
+      if (!isValidPoint(s)) fail(400, `Stop ${i + 1} needs a location`);
+      if (!inServiceArea(s)) fail(422, `Stop ${i + 1} is beyond 20 km of Pokhara`);
+      return { lat: s.lat, lng: s.lng, label: String(s.label || nearestPlace(s)?.name || wardOf(s)?.label || `Stop ${i + 1}`).slice(0, 80), ward: wardOf(s)?.ward ?? null };
+    });
+  }
+  /** Road route through the stops: legs joined, distances and times added, a short wait at each stop. */
+  async function routeVia(points) {
+    const legs = [];
+    for (let i = 1; i < points.length; i++) legs.push(await routeFn(points[i - 1], points[i]));
+    if (legs.length === 1) return legs[0];
+    return {
+      km: legs.reduce((s, l) => s + l.km, 0),
+      min: legs.reduce((s, l) => s + l.min, 0) + STOP_MIN * (legs.length - 1),
+      geometry: legs.flatMap((l, i) => (i ? l.geometry.slice(1) : l.geometry)),
+      source: legs.every((l) => l.source === legs[0].source) ? legs[0].source : 'mixed',
+    };
+  }
+
   function discountStack(user, serviceId, promoCode, useCredits) {
     return rewards.discountsFor({ store, user, serviceId, promoCode, useCredits, now: now() });
   }
 
-  async function quoteAll({ pickup, drop, kind = 'ride', parcel, promoCode, useCredits = true }, user) {
+  async function quoteAll({ pickup, drop, stops, kind = 'ride', parcel, promoCode, useCredits = true }, user) {
     const list = Object.entries(SERVICES).filter(([, s]) => kindOf(s) === kind);
     if (!list.length) fail(400, 'Unknown trip kind');
     checkPoints(list[0][1], pickup, drop);
-    const r = await routeFn(pickup, drop);
+    const via = cleanStops(list[0][1], stops);
+    const r = await routeVia([pickup, ...via, drop]);
     const member = user && rewards.isMember(user, now());
     let promoError = null;
     const quotes = [];
@@ -223,11 +251,12 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
 
   // ---------- trips ----------
   async function createTrip(user, body) {
-    const { service, pickup, drop, payment = 'cash', womenOnly = false, scheduledAt, parcel, recipient, promoCode, note, useCredits = true } = body;
+    const { service, pickup, drop, stops, payment = 'cash', womenOnly = false, scheduledAt, parcel, recipient, promoCode, note, useCredits = true } = body;
     const svc = SERVICES[service] || fail(400, 'Choose a service');
     if (!['cash', 'esewa', 'khalti', 'fonepay'].includes(payment)) fail(400, 'Unsupported payment method');
     if (store.all('trips').some((t) => t.riderId === user.id && ACTIVE.includes(t.status))) fail(409, 'You already have an active trip');
     checkPoints(svc, pickup, drop);
+    const via = cleanStops(svc, stops);
     if (svc.kind === 'delivery') {
       if (!recipient || !recipient.name || !PHONE_RE.test(String(recipient.phone || ''))) fail(400, 'Recipient name and a valid mobile number are required');
       if (!parcel || !(parcel.weightKg > 0)) fail(400, 'Goods weight is required');
@@ -242,7 +271,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     }
     const discounts = discountStack(user, service, promoCode, useCredits);
     const member = rewards.isMember(user, now());
-    const r = await routeFn(pickup, drop);
+    const r = await routeVia([pickup, ...via, drop]);
     const q = quote(service, r, { parcel, waiveCod: member, discounts });
     const dues = user.dues || 0;
 
@@ -256,6 +285,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       business: user.business || null,
       pickup: { lat: pickup.lat, lng: pickup.lng, label: label(pickup), ward: wardOf(pickup)?.ward ?? null },
       drop: { lat: drop.lat, lng: drop.lng, label: drop.label || label(drop), ward: wardOf(drop)?.ward ?? null },
+      stops: via, stopsDone: 0, // stops on the way; the driver marks each one done
       route: { km: r.km, min: r.min, geometry: r.geometry, source: r.source },
       quote: q,
       discountsRequested: discounts,
@@ -338,7 +368,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const employee = driver?.driverType === 'employee';
     return {
       id: trip.id, kind: trip.kind, logistics: trip.logistics, service: trip.service, status: trip.status,
-      pickup: trip.pickup, drop: trip.drop, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
+      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
       fare: trip.fare,
       earning: employee ? null : trip.quote.split.driver, // fleet employees are paid wages, not per trip
       employee,
@@ -808,6 +838,18 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return t;
   }
 
+  /** Driver: done at the current stop, on to the next one (or the destination). */
+  function nextStop(user, id) {
+    const { t } = ownTrip(user, id);
+    if (t.status !== 'in_progress') fail(409, 'Start the trip first');
+    if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    t.stopsDone = (t.stopsDone || 0) + 1;
+    t.events.push({ at: now(), status: 'in_progress', note: `stop_${t.stopsDone}_done` });
+    store.save();
+    emitTrip(t);
+    return t;
+  }
+
   async function completeTrip(user, id, { deliveryOtp, codCollected, podPhoto } = {}) {
     const { d, t } = ownTrip(user, id);
     if (t.status !== 'in_progress') fail(409, 'Trip has not started');
@@ -926,7 +968,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, messages, sendMessage, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }
