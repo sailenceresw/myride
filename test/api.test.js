@@ -186,6 +186,33 @@ test('share trip: the customer picks close ones, who get the live link by SMS, t
   assert.equal((await api('DELETE', '/api/profile/close-contacts/9822222222', null, rider.token)).body.closeContacts.some((c) => c.phone === '9822222222'), false);
 });
 
+test('stops: up to 2 on the way, priced on the whole route; the rider marks each stop done', async () => {
+  const body = { pickup: P('lakeside'), drop: P('prithvi-chowk'), kind: 'ride' };
+  const direct = (await api('POST', '/api/quote', body, rider.token)).body;
+  const via = (await api('POST', '/api/quote', { ...body, stops: [P('mahendrapul')] }, rider.token)).body;
+  assert.ok(via.route.km > direct.route.km, 'the detour adds distance');
+  const bikeDirect = direct.quotes.find((q) => q.service === 'bike'), bikeVia = via.quotes.find((q) => q.service === 'bike');
+  assert.ok(bikeVia.total >= bikeDirect.total, 'and is priced on the whole route');
+  assert.equal((await api('POST', '/api/quote', { ...body, stops: [P('damside'), P('bagar'), P('new-road')] }, rider.token)).status, 400, 'max 2 stops');
+  assert.equal((await api('POST', '/api/quote', { ...body, stops: [KTM] }, rider.token)).status, 422, 'stops stay within 20 km');
+  assert.equal((await api('POST', '/api/quote', { ...body, kind: 'delivery', stops: [P('damside')], parcel: { weightKg: 1 } }, rider.token)).status, 400, 'rides only');
+
+  const t = (await api('POST', '/api/trips', { service: 'bike', ...body, stops: [P('mahendrapul'), P('bagar')], payment: 'cash' }, rider.token)).body;
+  assert.deepEqual(t.stops.map((s) => s.label), ['Mahendrapul', 'Bagar']);
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  const offer = (await api('GET', `/api/trips/${t.id}`, null, bikeDrv.token)).body;
+  assert.equal(offer.stops.length, 2, 'the rider sees the stops');
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'not before the trip starts');
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).body.stopsDone, 1);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, rider.token)).status, 403, 'only the rider driving');
+  assert.equal((await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.stopsDone, 1, 'the customer sees progress');
+  await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'no third stop');
+  assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
+});
+
 test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
   const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');

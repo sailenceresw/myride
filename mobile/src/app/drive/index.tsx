@@ -195,15 +195,18 @@ export default function DriverHome() {
   // ---------- on a trip: Uber-style navigation ----------
   if (trip && navigating) {
     const toPickup = trip.status === 'accepted';
-    const dest = toPickup ? trip.pickup : trip.drop;
+    // On the trip: the next stop the customer asked for, then the destination.
+    const stopNo = trip.stopsDone ?? 0;
+    const nextStop = !toPickup ? trip.stops?.[stopNo] : undefined;
+    const dest = toPickup ? trip.pickup : nextStop ?? trip.drop;
     const delivering = !toPickup && trip.kind === 'delivery';
     return (
       <>
       {chatModal}
       <Navigator
-        key={`${trip.id}-${trip.status}`}
+        key={`${trip.id}-${trip.status}-${stopNo}`}
         destination={dest}
-        destinationLabel={dest.label ?? (toPickup ? 'Pickup' : 'Drop')}
+        destinationLabel={nextStop ? `Stop ${stopNo + 1} · ${nextStop.label ?? ''}` : dest.label ?? (toPickup ? 'Pickup' : 'Drop')}
         simulate={simulate}
         vehicleIcon={vehicleEmoji(d?.vehicle.type)}
         onPosition={report}
@@ -213,7 +216,7 @@ export default function DriverHome() {
             <Row style={{ gap: 12 }}>
               <Avatar name={delivering ? trip.recipient?.name ?? 'Receiver' : trip.riderName} size={44} />
               <View style={{ flex: 1 }}>
-                <Txt style={{ fontWeight: '800' }}>{toPickup ? `Pick up ${trip.riderName}` : delivering ? `Deliver to ${trip.recipient?.name ?? 'receiver'}` : `Drop ${trip.riderName}`}</Txt>
+                <Txt style={{ fontWeight: '800' }}>{toPickup ? `Pick up ${trip.riderName}` : delivering ? `Deliver to ${trip.recipient?.name ?? 'receiver'}` : nextStop ? `Stop ${stopNo + 1} of ${trip.stops!.length} for ${trip.riderName}` : `Drop ${trip.riderName}`}</Txt>
                 <Txt kind="small">{rs(trip.fare)} · {trip.payment}{trip.parcel ? ` · ${trip.parcel.weightKg} kg${trip.parcel.codAmount ? ` · collect COD ${rs(trip.parcel.codAmount)}` : ''}` : ''}</Txt>
               </View>
               {!delivering && <ChatButton unread={chat.unread} onPress={chat.open} />}
@@ -228,7 +231,9 @@ export default function DriverHome() {
             {!!err && <Row><Icon name="alert-circle" size={18} color={t.danger} /><Text style={{ color: t.danger, flex: 1 }}>{err}</Text></Row>}
             {toPickup
               ? <Button title="Arrived at pickup" icon="flag" onPress={() => act('arrived')} loading={busy} />
-              : <Button title={delivering ? 'Confirm delivery' : 'Complete trip'} icon="checkmark-done" kind="dark" onPress={() => act('complete', { deliveryOtp: code, codCollected: codDone })} loading={busy} />}
+              : nextStop
+                ? <Button title={`At stop ${stopNo + 1}, continue`} icon="arrow-forward" kind="dark" onPress={() => act('next-stop')} loading={busy} />
+                : <Button title={delivering ? 'Confirm delivery' : 'Complete trip'} icon="checkmark-done" kind="dark" onPress={() => act('complete', { deliveryOtp: code, codCollected: codDone })} loading={busy} />}
             <Row style={{ justifyContent: 'space-between' }}>
               <Row><Switch value={simulate} onValueChange={setSimulate} /><Txt kind="small">Demo: simulate driving</Txt></Row>
               {toPickup && <Pressable onPress={() => act('cancel', { reason: 'driver_cancelled' })} hitSlop={8}><Text style={{ color: t.danger, fontWeight: '700' }}>Cancel trip</Text></Pressable>}
@@ -383,7 +388,7 @@ function OfferCard({ o, more, onAccept, onExpire }: { o: DriverTrip; more: numbe
         </View>
         <View style={{ flex: 1, gap: 10 }}>
           <View><Txt style={{ fontWeight: '700' }} numberOfLines={1}>{o.pickup.label}</Txt><Txt kind="small">{o.pickupKm} km away</Txt></View>
-          <View><Txt style={{ fontWeight: '700' }} numberOfLines={1}>{o.drop.label}</Txt><Txt kind="small">{o.km.toFixed(1)} km trip</Txt></View>
+          <View><Txt style={{ fontWeight: '700' }} numberOfLines={1}>{o.drop.label}</Txt><Txt kind="small">{o.km.toFixed(1)} km trip{o.stops?.length ? ` · +${o.stops.length} stop${o.stops.length > 1 ? 's' : ''}` : ''}</Txt></View>
         </View>
       </View>
       {o.parcel && <Txt kind="small" style={{ marginBottom: 6 }}>{o.parcel.goodsType ?? 'Parcel'} · {o.parcel.weightKg} kg{o.parcel.codAmount ? ` · collect COD ${rs(o.parcel.codAmount)}` : ''}</Txt>}
