@@ -407,6 +407,26 @@ test('eSewa: membership order callback activates Plus; tampered callback rejecte
   assert.equal((await api('GET', '/api/profile', null, u.token)).body.membership.active, true);
 });
 
+test('eSewa trip payment: after the ride the customer pays the exact fare; only a verified callback marks it paid', async () => {
+  const u = await login('9846000041', 'Wallet Payer');
+  store.get('users', u.user.id).firstRideFreeUsed = true; // a paid ride, not the free first one
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('prithvi-chowk'), payment: 'esewa' }, u.token)).body;
+  assert.ok(t.fare > 0, 'a fare to pay');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  const done = (await api('GET', `/api/trips/${t.id}`, null, u.token)).body;
+  const pay = (await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).body;
+  assert.equal(pay.provider, 'esewa');
+  assert.equal(+pay.fields.total_amount, done.fare, 'charges exactly the fare');
+  const cb = { transaction_code: '000TRIP', status: 'COMPLETE', total_amount: pay.fields.total_amount, transaction_uuid: pay.fields.transaction_uuid, product_code: 'EPAYTEST', signed_field_names: 'transaction_code,status,total_amount,transaction_uuid,product_code,signed_field_names' };
+  cb.signature = esewaSign(cb, cb.signed_field_names);
+  assert.match((await api('GET', `/api/pay/esewa/success?data=${encodeURIComponent(Buffer.from(JSON.stringify(cb)).toString('base64'))}`)).headers.get('location'), /payment=paid/);
+  assert.equal((await api('GET', `/api/trips/${t.id}`, null, u.token)).body.payment.status, 'paid');
+  assert.equal((await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).status, 409, 'cannot pay twice');
+});
+
 test('admin promo creation and economics endpoint (v1 vs v2 bridge, 24-month projection, fleet)', async () => {
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15, maxOff: 40 }, admin.token)).status, 200);
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15 }, admin.token)).status, 409);

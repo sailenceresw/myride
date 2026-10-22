@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { PayScreen, type PayInit } from '@/components/PayScreen';
 import { Avatar, BackHeader, Button, Card, Hero, Icon, ListRow, Pill, Row, Txt } from '@/components/ui';
 import { api, apiUrlFor, rs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -28,6 +29,7 @@ export default function Account() {
   const [config, setConfig] = useState<Config | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [checkout, setCheckout] = useState<{ plan: 'plus_monthly' | 'plus_yearly'; method: 'esewa' | 'khalti' | 'sandbox' } | null>(null);
   const [name, setName] = useState('');
 
   useEffect(() => { api<Config>('GET', '/api/config').then(setConfig).catch(() => {}); }, []);
@@ -36,15 +38,15 @@ export default function Account() {
   const m = profile.membership;
   const plans = config?.membership.plans;
 
-  async function subscribe(plan: 'plus_monthly' | 'plus_yearly') {
-    setBusy(plan);
-    try {
-      // Sandbox checkout in development; production uses the eSewa/Khalti hosted payment page.
-      await api('POST', '/api/membership/checkout', { plan, payment: 'sandbox' });
-      await refresh();
-      Alert.alert('Welcome to MyRide Plus', '5% off every trip, free cancellations and priority matching.');
-    } catch (e) { Alert.alert('Payment', (e as Error).message); }
-    setBusy(null);
+  // Plus is paid in eSewa or Khalti's own page (PayScreen); "Test payment" exists only in development builds.
+  function subscribe(plan: 'plus_monthly' | 'plus_yearly') {
+    const pay = (method: 'esewa' | 'khalti' | 'sandbox') => setCheckout({ plan, method });
+    Alert.alert('Pay for MyRide Plus', 'Choose how to pay', [
+      { text: 'eSewa', onPress: () => pay('esewa') },
+      { text: 'Khalti', onPress: () => pay('khalti') },
+      ...(__DEV__ ? [{ text: 'Test payment (dev)', onPress: () => pay('sandbox') }] : []),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
   }
   async function trial() {
     setBusy('trial');
@@ -159,6 +161,17 @@ export default function Account() {
           <Button title="Sign out" icon="log-out-outline" kind="ghost" onPress={() => Alert.alert('Sign out?', 'You will need an SMS code to sign in again.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={{ marginTop: 8 }} />
         </View>
       </ScrollView>
+
+      {checkout && (
+        <PayScreen
+          visible title="MyRide Plus" onClose={() => setCheckout(null)}
+          start={() => api<PayInit>('POST', '/api/membership/checkout', { plan: checkout.plan, payment: checkout.method })}
+          onResult={async (r) => {
+            if (r === 'membership_active') { await refresh(); Alert.alert('Welcome to MyRide Plus', '5% off every trip, free cancellations and priority matching.'); }
+            else if (r !== 'cancelled') Alert.alert('Payment', 'The payment did not go through. You have not been charged for Plus.');
+          }}
+        />
+      )}
     </View>
   );
 }

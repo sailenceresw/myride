@@ -48,7 +48,7 @@ export type Quote = {
   split: { driver: number; promoCost: number };
 };
 export type Trip = {
-  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string; scheduledAt?: number | null;
+  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string; scheduledAt?: number | null; createdAt: number;
   pickup: Point; drop: Point; route: { km: number; min: number; geometry: [number, number][] };
   stops?: Point[]; stopsDone?: number; // stops on the way (rides), and how many the rider has completed
   quote: Quote & { lines: { label: string; amount: number }[] };

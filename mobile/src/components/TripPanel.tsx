@@ -12,6 +12,7 @@ const STATUS: Record<string, string> = {
   completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No riders available right now', scheduled: 'Scheduled',
 };
 const STEP_OF: Record<string, number> = { searching: 0, accepted: 1, arrived: 2, in_progress: 3 };
+const WALLET: Record<string, string> = { esewa: 'eSewa', khalti: 'Khalti', fonepay: 'Fonepay' };
 const PRAISE = ['Great driving', 'On time', 'Friendly', 'Clean vehicle', 'Knew the way', 'Safe helmet'];
 const PROBLEMS = ['Late pickup', 'Unsafe driving', 'Rude', 'Took a longer route', 'Dirty vehicle', 'Asked for more money'];
 
@@ -24,8 +25,8 @@ const roadMin = (a: Point, b: Point) => {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onRate, onSos, onDone }: {
-  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
+export function TripPanel({ trip, err, unread, onMessage, onShare, onPay, onCancel, onRate, onSos, onDone }: {
+  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onPay: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
 }) {
   const t = useTheme();
   const now = useNow();
@@ -110,6 +111,10 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
             <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginVertical: 8 }} />
             <Row style={{ justifyContent: 'space-between' }}><Txt style={{ fontWeight: '800' }}>Total · {trip.payment.method}</Txt><Txt kind="price" style={{ color: trip.fare === 0 ? t.ok : t.ink }}>{trip.fare === 0 ? 'FREE' : rs(trip.fare)}</Txt></Row>
           </Card>
+          {/* eSewa / Khalti trips are paid in the wallet's own page after the ride. */}
+          {trip.payment.method !== 'cash' && trip.fare > 0 && (trip.payment.status === 'paid'
+            ? <Row style={{ marginTop: 8, justifyContent: 'center' }}><Icon name="checkmark-circle" size={18} color={t.ok} /><Txt style={{ color: t.ok, fontWeight: '700' }}>Paid with {WALLET[trip.payment.method] ?? trip.payment.method}</Txt></Row>
+            : <Button title={`Pay ${rs(trip.fare)} with ${WALLET[trip.payment.method] ?? trip.payment.method}`} icon="wallet" kind="dark" onPress={onPay} style={{ marginTop: 10 }} />)}
           <Rating trip={trip} onRate={onRate} />
         </>
       )}
