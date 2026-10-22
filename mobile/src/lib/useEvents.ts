@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import EventSource from 'react-native-sse';
-import { apiUrlFor, getApiToken } from './api';
+import { apiUrlFor, getApiToken, type ChatMessage } from './api';
 
-export type ServerEvent = { type: string; role?: 'rider' | 'driver'; status?: string; trip?: any };
+export type ServerEvent = { type: string; role?: 'rider' | 'driver'; status?: string; trip?: any; tripId?: string; message?: ChatMessage };
 
 /**
  * Live server events (offers, trip status, selfie checks) over SSE while `enabled`.

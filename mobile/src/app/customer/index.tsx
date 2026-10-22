@@ -7,6 +7,7 @@ import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
 import { MapPicker } from '@/components/MapPicker';
 import { PlaceSearch, type Kind, type Place, type Shortcut } from '@/components/PlaceSearch';
 import { QuoteRow } from '@/components/QuoteRow';
+import { TripChat } from '@/components/TripChat';
 import { TripPanel } from '@/components/TripPanel';
 import { Button, Chip, Icon, RoundButton, Row, Sheet, Txt, type IconName } from '@/components/ui';
 import { api, rs, type Point, type Quote, type Trip } from '@/lib/api';
@@ -17,6 +18,7 @@ import { useLocation } from '@/lib/useLocation';
 import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 import { useSavedPlaces, type SavedKey } from '@/lib/useSavedPlaces';
+import { useTripChat } from '@/lib/useTripChat';
 
 type QuoteResp = { route: { km: number; min: number; geometry: [number, number][] }; quotes: Quote[]; pickupWard: string | null; dropWard: string | null; recommend: string | null; promoError: string | null };
 
@@ -133,9 +135,12 @@ export default function CustomerHome() {
     if (next.status !== trip?.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTrip(next);
   };
+  // Chat with the rider once one has accepted (messages stay readable after the trip).
+  const chat = useTripChat(trip?.driver ? trip.id : null, 'rider');
+  const chatOpen = !!trip && ['accepted', 'arrived', 'in_progress'].includes(trip.status);
   // Server events say role 'rider' for the customer (legacy server naming, see mobile/AGENTS.md).
-  useEvents((e) => { if (e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
-  usePolling(async () => update(await api<Trip>('GET', `/api/trips/${trip!.id}`)), 15000, live);
+  useEvents((e) => { if (!chat.receive(e) && e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
+  usePolling(async () => { update(await api<Trip>('GET', `/api/trips/${trip!.id}`)); if (trip?.driver) await chat.refresh(); }, 15000, live);
 
   // Vehicles around the pickup (or around Pokhara's centre while the user is outside the city).
   const around = pickup ?? (outside ? city!.centre : null);
@@ -316,7 +321,7 @@ export default function CustomerHome() {
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} err={err} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
@@ -402,6 +407,15 @@ export default function CustomerHome() {
           </ScrollView>
         )}
       </Sheet>
+
+      {trip?.driver && (
+        <TripChat
+          visible={chat.visible} onClose={chat.close} tripId={trip.id} me="rider" open={chatOpen}
+          name={trip.driver.name} subtitle={`${trip.driver.vehicle.model} · ${trip.driver.vehicle.plate}`} phone={trip.driver.phone}
+          messages={chat.messages} onSent={chat.sent}
+          quickReplies={trip.status === 'in_progress' ? ['Please slow down', 'Stop here, please', 'Thank you!'] : ["I'm at the pickup", "I'll be there in 2 min", 'Where are you?', 'Please wait a moment', 'Okay 👍']}
+        />
+      )}
     </View>
   );
 }

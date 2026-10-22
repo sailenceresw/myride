@@ -159,6 +159,26 @@ test('first ride is free (up to Rs 100) while the driver is paid in full; PIN re
   assert.equal((await api('GET', '/api/profile', null, rider.token)).body.firstRideFree, false);
 });
 
+test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  const sent = await api('POST', `/api/trips/${t.id}/messages`, { text: "  I'm at the blue gate  " }, rider.token);
+  assert.equal(sent.status, 200);
+  assert.deepEqual([sent.body.from, sent.body.text], ['rider', "I'm at the blue gate"]);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'Coming in 2 min' }, bikeDrv.token)).status, 200);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: '   ' }, rider.token)).status, 400);
+  const outsider = await login('9846000099', 'Someone Else');
+  assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, outsider.token)).status, 403);
+  const thread = (await api('GET', `/api/trips/${t.id}/messages`, null, bikeDrv.token)).body;
+  assert.deepEqual(thread.map((m) => m.from), ['rider', 'driver']);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'thanks!' }, rider.token)).status, 409, 'chat closes with the trip');
+  assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, rider.token)).body.length, 2, 'history stays readable');
+});
+
 test('MyRide Plus: sandbox checkout activates membership; 5% (max Rs 25) applied; free cancellation after driver waits', async () => {
   const pay = await api('POST', '/api/membership/checkout', { plan: 'plus_yearly', payment: 'esewa' }, rider.token);
   assert.equal(pay.body.provider, 'esewa');
