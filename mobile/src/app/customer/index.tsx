@@ -7,6 +7,7 @@ import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
 import { MapPicker } from '@/components/MapPicker';
 import { PlaceSearch, type Kind, type Place, type Shortcut } from '@/components/PlaceSearch';
 import { QuoteRow } from '@/components/QuoteRow';
+import { ShareTrip } from '@/components/ShareTrip';
 import { TripChat } from '@/components/TripChat';
 import { TripPanel } from '@/components/TripPanel';
 import { Button, Chip, Icon, RoundButton, Row, Sheet, Txt, type IconName } from '@/components/ui';
@@ -67,6 +68,7 @@ export default function CustomerHome() {
   const [promo, setPromo] = useState(''); // typed code
   const [promoApplied, setPromoApplied] = useState<string | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState(''); // for the rider: "blue gate opposite the school"
   const [noteOpen, setNoteOpen] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -321,7 +323,7 @@ export default function CustomerHome() {
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onShare={() => setShareOpen(true)} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
@@ -408,6 +410,12 @@ export default function CustomerHome() {
         )}
       </Sheet>
 
+      {trip && live && (
+        <ShareTrip
+          visible={shareOpen} onClose={() => setShareOpen(false)} trip={trip} saved={profile?.closeContacts ?? []}
+          onShared={(sharedWith) => { setTrip({ ...trip, sharedWith }); refresh(); }}
+        />
+      )}
       {trip?.driver && (
         <TripChat
           visible={chat.visible} onClose={chat.close} tripId={trip.id} me="rider" open={chatOpen}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
-import { apiUrlFor, rs, type Point, type Trip } from '@/lib/api';
+import { rs, type Point, type Trip } from '@/lib/api';
 import { call } from '@/lib/config';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useNow } from '@/lib/useNow';
@@ -24,15 +24,14 @@ const roadMin = (a: Point, b: Point) => {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, unread, onMessage, onCancel, onRate, onSos, onDone }: {
-  trip: Trip; err: string; unread: number; onMessage: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
+export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onRate, onSos, onDone }: {
+  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
 }) {
   const t = useTheme();
   const now = useNow();
   const d = trip.driver;
   const is = (...s: string[]) => s.includes(trip.status);
   const live =is('accepted', 'arrived', 'in_progress');
-  const share = () => Share.share({ message: `Track my MyRide trip live: ${apiUrlFor(`/track.html?t=${trip.shareToken}`)}` });
   // Live ETA from the rider's position, like Uber's "Arriving in 3 min" / "Arrive by 4:32 PM".
   const headline = is('accepted') && d?.loc ? `Arriving in ${roadMin(d.loc, trip.pickup)} min`
     : is('in_progress') && d?.loc ? `Arrive by ${clock(now + roadMin(d.loc, trip.drop) * 60000)}`
@@ -77,9 +76,14 @@ export function TripPanel({ trip, err, unread, onMessage, onCancel, onRate, onSo
         <Row style={{ marginTop: 10 }}>
           <Action icon="chatbubble-ellipses" label="Message" onPress={onMessage} badge={unread} />
           <Action icon="call" label="Call" onPress={() => call(d.phone)} />
-          <Action icon="share-social" label="Share trip" onPress={share} />
+          <Action icon="share-social" label="Share trip" onPress={onShare} />
           <Action icon="warning" label="SOS" onPress={onSos} danger />
         </Row>
+      )}
+      {live && !!trip.sharedWith?.length && (
+        <Pressable onPress={onShare} style={{ marginTop: 8 }}>
+          <Row><Icon name="eye-outline" size={16} color={t.ok} /><Txt kind="small" style={{ flex: 1 }}>Following your trip: {trip.sharedWith.map((c) => c.name.split(' ')[0]).join(', ')}</Txt></Row>
+        </Pressable>
       )}
 
       {!is('completed') && (
