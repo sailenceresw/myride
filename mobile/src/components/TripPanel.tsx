@@ -54,7 +54,11 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onPay, onCanc
         return (
           <Row style={{ marginTop: 6 }}>
             <Icon name={next ? 'flag-outline' : 'checkmark-done'} size={16} color={t.brand} />
-            <Txt kind="small" style={{ flex: 1 }}>{next ? `Next: stop ${done + 1} of ${trip.stops.length}, ${next.label}` : `Stops done: on to ${trip.drop.label}`}</Txt>
+            <Txt kind="small" style={{ flex: 1 }}>
+              {!next ? `Stops done: on to ${trip.drop.label}`
+                : trip.stopArrivedAt ? `At stop ${done + 1}, ${next.label}${trip.waitRule ? `: first ${trip.waitRule.freeMin} min free, then Rs ${trip.waitRule.perMin}/min` : ''}`
+                  : `Next: stop ${done + 1} of ${trip.stops.length}, ${next.label}`}
+            </Txt>
           </Row>
         );
       })()}

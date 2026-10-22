@@ -233,7 +233,10 @@ export default function DriverHome() {
             {toPickup
               ? <Button title="Arrived at pickup" icon="flag" onPress={() => act('arrived')} loading={busy} />
               : nextStop
-                ? <Button title={`At stop ${stopNo + 1}, continue`} icon="arrow-forward" kind="dark" onPress={() => act('next-stop')} loading={busy} />
+                // Two steps at a stop: arrived (starts the waiting clock, charged after the free minutes) → continue.
+                ? trip.stopArrivedAt
+                  ? <Button title={`Continue from stop ${stopNo + 1}`} icon="arrow-forward" kind="dark" onPress={() => act('next-stop')} loading={busy} />
+                  : <Button title={`Arrived at stop ${stopNo + 1}`} icon="flag" onPress={() => act('stop-arrived')} loading={busy} />
                 : <Button title={delivering ? 'Confirm delivery' : 'Complete trip'} icon="checkmark-done" kind="dark" onPress={() => act('complete', { deliveryOtp: code, codCollected: codDone })} loading={busy} />}
             <Row style={{ justifyContent: 'space-between' }}>
               <Row><Switch value={simulate} onValueChange={setSimulate} /><Txt kind="small">Demo: simulate driving</Txt></Row>

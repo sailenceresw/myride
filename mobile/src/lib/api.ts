@@ -51,6 +51,7 @@ export type Trip = {
   id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string; scheduledAt?: number | null; createdAt: number;
   pickup: Point; drop: Point; route: { km: number; min: number; geometry: [number, number][] };
   stops?: Point[]; stopsDone?: number; // stops on the way (rides), and how many the rider has completed
+  stopArrivedAt?: number | null; waitRule?: { freeMin: number; perMin: number }; // waiting at a stop: free minutes, then Rs/min
   quote: Quote & { lines: { label: string; amount: number }[] };
   payment: { method: string; status: string };
   // No phone number: call through callOnTrip(). heading: degrees, for drawing the car.
@@ -62,7 +63,7 @@ export type Trip = {
 export type ChatMessage = { id: string; from: 'rider' | 'driver'; text: string; at: number };
 export type DriverTrip = {
   id: string; status: string; kind: string; logistics?: boolean; service: string; fare: number; earning: number | null; employee: boolean;
-  pickup: Point; drop: Point; stops?: Point[]; stopsDone?: number; km: number; pickupKm: number; deadKmBonus: number; payment: string;
+  pickup: Point; drop: Point; stops?: Point[]; stopsDone?: number; stopArrivedAt?: number | null; km: number; pickupKm: number; deadKmBonus: number; payment: string;
   riderName: string; recipient?: { name: string; phone?: string }; offerExpiresAt: number;
   parcel?: { weightKg: number; goodsType?: string; codAmount?: number };
 };

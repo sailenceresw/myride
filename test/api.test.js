@@ -205,12 +205,20 @@ test('stops: up to 2 on the way, priced on the whole route; the rider marks each
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'not before the trip starts');
   await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  // Stop 1: the rider waits 8 min (3 free, like the pickup) → 5 min charged at the bike rate (Rs 2/min).
+  assert.ok((await api('POST', `/api/trips/${t.id}/stop-arrived`, {}, bikeDrv.token)).body.stopArrivedAt, 'waiting clock started');
+  clock += 8 * 60000;
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).body.stopsDone, 1);
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, rider.token)).status, 403, 'only the rider driving');
   assert.equal((await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.stopsDone, 1, 'the customer sees progress');
+  // Stop 2: a quick one (1 min) → nothing charged.
+  await api('POST', `/api/trips/${t.id}/stop-arrived`, {}, bikeDrv.token);
+  clock += 60000;
   await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token);
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'no third stop');
   assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
+  const receipt = (await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.quote.lines;
+  assert.deepEqual(receipt.find((l) => l.label.startsWith('Waiting at stops')), { label: 'Waiting at stops 5 min', amount: 10 });
 });
 
 test('account deletion: personal data removed, signed out everywhere, trips kept without the person', async () => {
