@@ -123,16 +123,17 @@ export default function CustomerHome() {
       .then(([p, c]) => { setPlaces([...p, ...c.logistics.destinations.map((d) => ({ ...d, category: 'intercity' }))]); setCity(c.city); setPlacesFailed(false); })
       .catch(() => setPlacesFailed(true));
   }, []);
-  const loadTrips = useCallback(() => {
+  // withUnpaid (app start only): if nothing is in progress, bring back a finished eSewa/Khalti ride still to pay
+  // (last 7 days), like Uber's outstanding balance. Not after "Done", or the customer could never get back to booking.
+  const loadTrips = useCallback((withUnpaid = false) => {
     api<Trip[]>('GET', '/api/trips').then((l) => {
-      // A trip in progress, or else a finished eSewa/Khalti ride still to pay (last 7 days), like Uber's outstanding balance.
-      const unpaid = l.find((x) => x.status === 'completed' && x.payment.method !== 'cash' && x.payment.status !== 'paid' && x.fare > 0 && Date.now() - x.createdAt < 7 * 86400000);
+      const unpaid = withUnpaid ? l.find((x) => x.status === 'completed' && ['esewa', 'khalti'].includes(x.payment.method) && ['due', 'pending'].includes(x.payment.status) && x.fare > 0 && Date.now() - x.createdAt < 7 * 86400000) : undefined;
       setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? unpaid ?? null);
       const seen = new Set<string>();
       setRecent(l.filter((x) => x.status === 'completed' && x.drop.label && !seen.has(x.drop.label) && seen.add(x.drop.label)).slice(0, 3).map((x) => x.drop));
     }).catch(() => {});
   }, []);
-  useEffect(() => { loadPlaces(); loadTrips(); }, [loadPlaces, loadTrips]);
+  useEffect(() => { loadPlaces(); loadTrips(true); }, [loadPlaces, loadTrips]);
 
   // Links from other screens: "Set Home / Work" (Account) opens that search; "Book again" (Your trips) below.
   const params = useLocalSearchParams<{ rebook?: string; set?: string }>();

@@ -167,13 +167,18 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   });
   // Crash and error reports from the apps (no third-party service needed): newest 500 kept, shown in the ops console.
   if (!Array.isArray(store.db.clientErrors)) store.db.clientErrors = [];
-  const errorBudget = new Map(); // ip → { minute, n }: at most 20 reports a minute per device
+  // Budgets per signed-in user (else per IP; set TRUST_PROXY behind a load balancer), plus a global cap.
+  const errorBudget = new Map(); // who → { minute, n }: at most 20 reports a minute each
+  let errorsThisMinute = { minute: 0, n: 0 }; // and at most 300 a minute in total
   app.post('/api/client-errors', (req, res) => {
     const minute = Math.floor(Date.now() / 60000);
-    const b = errorBudget.get(req.ip);
-    if (b && b.minute === minute && b.n >= 20) return res.status(429).end();
-    errorBudget.set(req.ip, b && b.minute === minute ? { minute, n: b.n + 1 } : { minute, n: 1 });
-    if (errorBudget.size > 5000) errorBudget.clear();
+    const who = svc.session(tokenOf(req))?.user.id || `ip:${req.ip}`;
+    if (errorsThisMinute.minute !== minute) errorsThisMinute = { minute, n: 0 };
+    const b = errorBudget.get(who);
+    if (errorsThisMinute.n >= 300 || (b && b.minute === minute && b.n >= 20)) return res.status(429).end();
+    errorsThisMinute.n += 1;
+    errorBudget.set(who, b && b.minute === minute ? { minute, n: b.n + 1 } : { minute, n: 1 });
+    if (errorBudget.size > 5000) for (const [k, v] of errorBudget) if (v.minute !== minute) errorBudget.delete(k); // drop old minutes only
     const body = req.body || {};
     const str = (v, n) => String(v ?? '').slice(0, n);
     const e = {

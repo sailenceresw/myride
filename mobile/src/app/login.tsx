@@ -44,7 +44,7 @@ export default function Login() {
           <Pressable onPress={() => WebBrowser.openBrowserAsync(apiUrlFor('/privacy.html'))} accessibilityRole="link" style={{ marginTop: 'auto', paddingVertical: 20, paddingHorizontal: 16 }}>
             <Row style={{ justifyContent: 'center' }}>
               <Icon name="lock-closed" size={13} color={t.muted} />
-              <Txt kind="small">Your number stays private, even from your {IS_DRIVE ? 'customer' : 'rider'}. <Text style={{ color: t.brand, fontWeight: '700' }}>Privacy</Text></Txt>
+              <Txt kind="small">Your number is never shown in trip details. <Text style={{ color: t.brand, fontWeight: '700' }}>Privacy</Text></Txt>
             </Row>
           </Pressable>
         </ScrollView>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -30,9 +30,11 @@ export function PayScreen({ visible, title, start, onResult, onClose }: {
   const t = useTheme();
   const [init, setInit] = useState<PayInit | null>(null);
   const [err, setErr] = useState('');
+  const finished = useRef(false); // the result URL can reach both WebView callbacks: report it once
 
   useEffect(() => {
     if (!visible) return;
+    finished.current = false;
     let live = true;
     start().then((r) => {
       if (!live) return;
@@ -45,8 +47,7 @@ export function PayScreen({ visible, title, start, onResult, onClose }: {
   const done = (url: string) => {
     const m = /[?&]payment=([a-z_]+)/.exec(url);
     if (!m) return false;
-    onResult(m[1] as PayResult);
-    onClose();
+    if (!finished.current) { finished.current = true; onResult(m[1] as PayResult); onClose(); }
     return true;
   };
 
