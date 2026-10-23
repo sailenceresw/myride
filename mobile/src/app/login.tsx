@@ -1,4 +1,6 @@
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { apiUrlFor } from '@/lib/api';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SignIn } from '@/components/SignIn';
 import { Hero, Icon, Row, Txt, type IconName } from '@/components/ui';
@@ -39,10 +41,12 @@ export default function Login() {
             </Pressable>
           )}
 
-          <Row style={{ justifyContent: 'center', marginTop: 'auto', paddingVertical: 20, paddingHorizontal: 16 }}>
-            <Icon name="lock-closed" size={13} color={t.muted} />
-            <Txt kind="small">Your number is only shared with your {IS_DRIVE ? 'customer' : 'rider'} during a trip</Txt>
-          </Row>
+          <Pressable onPress={() => WebBrowser.openBrowserAsync(apiUrlFor('/privacy.html'))} accessibilityRole="link" style={{ marginTop: 'auto', paddingVertical: 20, paddingHorizontal: 16 }}>
+            <Row style={{ justifyContent: 'center' }}>
+              <Icon name="lock-closed" size={13} color={t.muted} />
+              <Txt kind="small">Your number is never shown in trip details. <Text style={{ color: t.brand, fontWeight: '700' }}>Privacy</Text></Txt>
+            </Row>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

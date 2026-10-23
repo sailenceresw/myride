@@ -59,7 +59,7 @@ function goodsExtras(svc, goods = {}, { waiveCod = false } = {}) {
  * Quote a trip (before discounts are applied).
  * @param {string} serviceId key of SERVICES
  * @param {{km:number, min:number}} route measured road distance/time
- * @param {object} opts { parcel, waitMin, waiveCod, discounts:[...], promo (legacy single promo) }
+ * @param {object} opts { parcel, waitMin, stopWaits:[minutes at each stop], waiveCod, discounts:[...], promo (legacy single promo) }
  */
 function quote(serviceId, route, opts = {}) {
   const svc = SERVICES[serviceId];
@@ -100,8 +100,12 @@ function quote(serviceId, route, opts = {}) {
   const waitMin = Math.max(0, (opts.waitMin || 0) - svc.waitFreeMin);
   const waitFee = Math.round(waitMin) * svc.waitPerMin;
   if (waitFee) lines.push([`Waiting ${Math.round(waitMin)} min`, waitFee]);
+  // Stops on the way: each gets the same free minutes as the pickup, then the same per-minute rate.
+  const stopMin = (opts.stopWaits || []).reduce((s, m) => s + Math.max(0, m - svc.waitFreeMin), 0);
+  const stopFee = Math.round(stopMin) * svc.waitPerMin;
+  if (stopFee) lines.push([`Waiting at stops ${Math.round(stopMin)} min`, stopFee]);
 
-  const gross = tripFare + extras + waitFee;
+  const gross = tripFare + extras + waitFee + stopFee;
   const platformFee = platformFeeFor(svc, gross);
   const vatTransport = (gross * TAX.vatOnTransport) / (1 + TAX.vatOnTransport);
   // Traffic Accident Fund (federal draft): 1% of each ride fare; the platform adds 0.5% of its own income.

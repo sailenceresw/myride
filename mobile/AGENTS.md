@@ -8,6 +8,17 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
 3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
 
+## Two apps, one codebase — and what "rider" means
+
+| Store app | Variant (`APP_VARIANT`) | Who uses it | Routes | Server portal |
+|---|---|---|---|---|
+| **MyRide** (`np.myride.app`) | `customer` | People who book rides, parcels, logistics | `src/app/customer/*`, `become-rider` | `rider` |
+| **MyRide Drive** (`np.myride.driver`) | `drive` | People who work for MyRide | `src/app/drive/*` | `driver` |
+
+- **On screen, "rider" always means the person driving** (as in Nepal: Pathao rider). Customers are "you" / "customer". Never call a customer a rider in UI copy.
+- **In code, say `customer` and `driver`.** The server's legacy names leak through the API — portal `rider`, event `role: 'rider'`, `trip.riderName` all mean the **customer**. Don't copy that naming into new mobile code.
+- Each route group's `_layout.tsx` redirects away if the other variant (or a signed-out user) lands there, so a customer build can never render a driver screen. Shared screens live in `src/components/` and are re-exported from each group.
+
 ## Commands
 
 Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).

@@ -11,12 +11,25 @@ export const getApiToken = () => token;
 /** Absolute URL on the MyRide server (API calls, share links, web pages opened in-app). */
 export const apiUrlFor = (path: string) => `${API_URL}${path}`;
 
+const TIMEOUT_MS = 15000;
+
 export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrlFor(path), {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  // Without a timeout an unreachable server leaves screens spinning forever (fetch never settles on some networks).
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(apiUrlFor(path), {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } catch (e) {
+    throw new Error(abort.signal.aborted ? "Can't reach MyRide. Check your internet connection." : (e as Error).message);
+  } finally {
+    clearTimeout(timer);
+  }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, json.error || `Request failed (${res.status})`, json);
   return json as T;
@@ -28,22 +41,29 @@ export const rs = (n: number, decimals = 0) => `Rs ${(decimals ? n : Math.round(
 export type Point = { lat: number; lng: number; label?: string };
 export type Quote = {
   service: string; label: string; total: number; gross: number; km: number; min: number; available?: number;
+  pickupMin?: number | null; seats?: number | null; // nearest free driver's minutes to the pickup; passenger seats
   unavailable?: string; legalCap: number | null; intercity?: boolean;
   discounts: { kind: string; label: string; amount: number }[];
   competitors: { name: string; estimate: number }[];
   split: { driver: number; promoCost: number };
 };
 export type Trip = {
-  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string;
+  id: string; status: string; service: string; kind: string; logistics?: boolean; fare: number; pin: string; shareToken: string; scheduledAt?: number | null; createdAt: number;
   pickup: Point; drop: Point; route: { km: number; min: number; geometry: [number, number][] };
+  stops?: Point[]; stopsDone?: number; // stops on the way (rides), and how many the rider has completed
+  stopArrivedAt?: number | null; waitRule?: { freeMin: number; perMin: number }; // waiting at a stop: free minutes, then Rs/min
   quote: Quote & { lines: { label: string; amount: number }[] };
   payment: { method: string; status: string };
-  driver: null | { name: string; phone: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; fleet?: boolean };
+  // No phone number: call through callOnTrip(). heading: degrees, for drawing the car.
+  driver: null | { name: string; rating: number; vehicle: { type: string; plate: string; model: string }; loc: Point | null; heading?: number | null; fleet?: boolean; photo?: boolean };
   deliveryOtp?: string; recipient?: { name: string; phone: string }; riderRating?: { stars: number };
+  sharedWith?: { name: string; phone: string }[]; // close ones following this trip by SMS
 };
+/** In-trip chat. `from` uses the server's names: 'rider' = the customer, 'driver' = the person driving. */
+export type ChatMessage = { id: string; from: 'rider' | 'driver'; text: string; at: number };
 export type DriverTrip = {
   id: string; status: string; kind: string; logistics?: boolean; service: string; fare: number; earning: number | null; employee: boolean;
-  pickup: Point; drop: Point; km: number; pickupKm: number; deadKmBonus: number; payment: string;
-  riderName: string; riderPhone?: string; recipient?: { name: string; phone?: string }; offerExpiresAt: number;
+  pickup: Point; drop: Point; stops?: Point[]; stopsDone?: number; stopArrivedAt?: number | null; km: number; pickupKm: number; deadKmBonus: number; payment: string;
+  riderName: string; recipient?: { name: string; phone?: string }; offerExpiresAt: number;
   parcel?: { weightKg: number; goodsType?: string; codAmount?: number };
 };

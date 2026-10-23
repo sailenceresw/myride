@@ -3,7 +3,8 @@ const express = require('express');
 const { createService, HttpError } = require('./service');
 const { SERVICES, SAFETY, CITY, GANDAKI, FEDERAL_DRAFT, COMPLIANCE, VEHICLES, LOGISTICS, MEMBERSHIP, KYC, PAYROLL } = require('./config');
 const { quote, gandakiCap, federalCap } = require('./pricing');
-const { places, cities, navigationRoute, isValidPoint } = require('./geo');
+const { places, cities, navigationRoute, isValidPoint, wardOf } = require('./geo');
+const search = require('./search');
 const { createFiles } = require('./files');
 const { monthly, projection, compareVersions, fleetUnitEconomics, SCENARIOS, FIXED_COSTS } = require('./economics');
 const { batchCsv } = require('./payroll');
@@ -81,6 +82,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     logistics: { ...LOGISTICS },
     membership: MEMBERSHIP,
     safety: SAFETY,
+    support: { phone: process.env.SUPPORT_PHONE || null }, // MyRide customer support line (Help in the apps)
     regulation: { maxRadiusKm: CITY.maxRadiusKm, maxDriverHoursPerDay: GANDAKI.maxDriverHoursPerDay, fareSchedule: { bike: GANDAKI.bike, car: GANDAKI.car }, discounts: GANDAKI.discount },
     kyc: { banks: KYC.banks, documents: KYC.documents },
     payroll: { defaultWage: PAYROLL.defaultMonthlyWage, minimumWage: PAYROLL.minimumWageMonthly, overtimeMultiplier: PAYROLL.overtimeMultiplier },
@@ -106,6 +108,18 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/places', (req, res) => {
     const wards = cities.pokhara.wards.map((w) => ({ id: `ward-${w.ward}`, name: `Ward ${w.ward} · ${w.name}`, category: 'ward', lat: w.lat, lng: w.lng, ward: w.ward }));
     res.json([...places.map(({ osm, ...p }) => p), ...wards]);
+  });
+  // Any named place in and around Pokhara (OpenStreetMap gazetteer), in Nepali or English, typos allowed.
+  app.get('/api/places/search', (req, res) => {
+    const q = String(req.query.q || '').slice(0, 80);
+    const near = { lat: +req.query.lat, lng: +req.query.lng };
+    res.json(search.search(q, { near: isValidPoint(near) ? near : null, limit: Math.min(+req.query.limit || 20, 40) }));
+  });
+  // Address of a point (pin on the map, GPS): place, street, area and ward.
+  app.get('/api/places/reverse', (req, res) => {
+    const p = { lat: +req.query.lat, lng: +req.query.lng };
+    if (!isValidPoint(p)) return res.status(400).json({ error: 'lat,lng required' });
+    res.json(search.reverse(p, wardOf));
   });
   app.get('/api/wards', (req, res) => res.json(cities.pokhara.wards.map(({ bbox, ...w }) => w)));
   app.get('/api/boundary', (req, res) => res.json(cities.pokhara.boundaryGeo));
@@ -151,6 +165,32 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => { clearInterval(ping); channels.forEach((ch) => bus.unsubscribe(ch, res)); });
   });
+  // Crash and error reports from the apps (no third-party service needed): newest 500 kept, shown in the ops console.
+  if (!Array.isArray(store.db.clientErrors)) store.db.clientErrors = [];
+  // Budgets per signed-in user (else per IP; set TRUST_PROXY behind a load balancer), plus a global cap.
+  const errorBudget = new Map(); // who → { minute, n }: at most 20 reports a minute each
+  let errorsThisMinute = { minute: 0, n: 0 }; // and at most 300 a minute in total
+  app.post('/api/client-errors', (req, res) => {
+    const minute = Math.floor(Date.now() / 60000);
+    const who = svc.session(tokenOf(req))?.user.id || `ip:${req.ip}`;
+    if (errorsThisMinute.minute !== minute) errorsThisMinute = { minute, n: 0 };
+    const b = errorBudget.get(who);
+    if (errorsThisMinute.n >= 300 || (b && b.minute === minute && b.n >= 20)) return res.status(429).end();
+    errorsThisMinute.n += 1;
+    errorBudget.set(who, b && b.minute === minute ? { minute, n: b.n + 1 } : { minute, n: 1 });
+    if (errorBudget.size > 5000) for (const [k, v] of errorBudget) if (v.minute !== minute) errorBudget.delete(k); // drop old minutes only
+    const body = req.body || {};
+    const str = (v, n) => String(v ?? '').slice(0, n);
+    const e = {
+      at: Date.now(), app: str(body.app, 20), version: str(body.version, 20), platform: str(body.platform, 20), fatal: !!body.fatal,
+      screen: str(body.screen, 100), message: str(body.message, 500), stack: str(body.stack, 4000), userId: svc.session(tokenOf(req))?.user.id || null,
+    };
+    store.db.clientErrors.push(e);
+    if (store.db.clientErrors.length > 500) store.db.clientErrors.shift();
+    store.save();
+    bus.emit('admin', { type: 'client_error', app: e.app, fatal: e.fatal, message: e.message });
+    res.status(204).end();
+  });
   // Expo push token of this device, per portal (the rider and Drive apps are separate installs).
   app.post('/api/push/token', anyAuth, (req, res) => {
     if (!push.register(req.user, req.body.token, req.portal)) return res.status(400).json({ error: 'Invalid Expo push token' });
@@ -161,6 +201,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   // ---------- rider: profile, membership, referral ----------
   app.get('/api/profile', rider, (req, res) => res.json(svc.profile(req.user)));
   app.patch('/api/profile', rider, wrap((req) => svc.updateProfile(req.user, req.body)));
+  app.delete('/api/profile', rider, wrap((req) => svc.deleteAccount(req.user))); // store rule: delete your account in the app
   app.post('/api/profile/referral', rider, wrap((req) => svc.applyReferral(req.user, req.body.code)));
   app.post('/api/membership/trial', rider, wrap((req) => svc.startTrial(req.user, req.body.plan)));
   app.post('/api/membership/cancel', rider, wrap((req) => svc.cancelMembership(req.user)));
@@ -189,6 +230,21 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const t = svc.getTripFor(req.user, req.params.id);
     return req.portal === 'driver' ? svc.driverView(t, svc.driverOf(req.user)) : svc.riderView(t);
   }));
+  // Chat between the customer and the rider while a trip is on (accepted → in progress).
+  app.get('/api/trips/:id/messages', anyAuth, wrap((req) => svc.messages(req.user, req.params.id)));
+  app.post('/api/trips/:id/messages', anyAuth, wrap((req) => svc.sendMessage(req.user, req.params.id, req.body.text)));
+  // Calls without sharing phone numbers: the app asks who to dial (a masked bridge number + trip code when configured).
+  app.post('/api/trips/:id/call', anyAuth, wrap((req) => svc.callInfo(req.user, req.params.id)));
+  // For the call-bridge provider's IVR: which number to connect a caller to, by trip code (shared-secret header).
+  app.post('/api/call-bridge/lookup', (req, res) => {
+    const secret = process.env.CALL_BRIDGE_SECRET;
+    if (!secret || req.get('x-bridge-secret') !== secret) return res.status(401).json({ error: 'Unauthorised' });
+    const hit = svc.bridgeLookup(req.body.code, String(req.body.caller || '').replace(/\D/g, '').slice(-10));
+    return hit ? res.json(hit) : res.status(404).json({ error: 'No active trip for this code and caller' });
+  });
+  // The customer sends the live trip to people they choose (SMS now, again on arrival or SOS).
+  app.post('/api/trips/:id/share', rider, wrap((req) => svc.shareTrip(req.user, req.params.id, req.body.contacts)));
+  app.delete('/api/profile/close-contacts/:phone', rider, wrap((req) => svc.forgetCloseContact(req.user, req.params.phone)));
   app.post('/api/trips/:id/cancel', anyAuth, wrap((req) => svc.riderView(svc.cancelTrip(req.user, req.params.id, req.body.reason))));
   app.post('/api/trips/:id/rate', anyAuth, wrap((req) => { svc.rateTrip(req.user, req.params.id, req.body.stars, req.body.comment); return { ok: true }; }));
   app.post('/api/trips/:id/sos', anyAuth, wrap((req) => ({ incident: svc.sos(req.user, req.params.id, req.body.loc), call: SAFETY })));
@@ -235,6 +291,20 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   }));
 
   // ---------- files (owner or admin only) ----------
+  // The rider's verified photo (KYC selfie), so the customer can check who is picking them up. Only the customer of
+  // this trip, from acceptance until 2 hours after it ends.
+  app.get('/api/trips/:id/driver-photo', rider, wrap((req, res) => {
+    const t = svc.getTripFor(req.user, req.params.id);
+    if (t.riderId !== req.user.id) throw new HttpError(403, 'Not your trip');
+    const ended = ['completed', 'cancelled'].includes(t.status) ? t.events.at(-1).at : null;
+    if (!['accepted', 'arrived', 'in_progress', 'completed'].includes(t.status) || (ended && (now ? now() : Date.now()) - ended > 2 * 3600000)) throw new HttpError(409, 'Photo available during the trip only');
+    const d = t.driverId && store.get('drivers', t.driverId);
+    const f = d?.faceRef && files.read(d.faceRef);
+    if (!f) throw new HttpError(404, 'No photo');
+    res.setHeader('Content-Type', f.rec.mime);
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    res.end(f.buf);
+  }));
   app.get('/api/files/:id', anyAuth, (req, res) => {
     const f = files.read(req.params.id);
     if (!f) return res.status(404).json({ error: 'Not found' });
@@ -265,6 +335,8 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/driver/offers', driver, (req, res) => res.json(svc.offersFor(req.user)));
   app.post('/api/trips/:id/accept', driver, wrap((req) => svc.driverView(svc.acceptTrip(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/arrived', driver, wrap((req) => svc.driverView(svc.arrived(req.user, req.params.id), svc.driverOf(req.user))));
+  app.post('/api/trips/:id/stop-arrived', driver, wrap((req) => svc.driverView(svc.stopArrived(req.user, req.params.id), svc.driverOf(req.user))));
+  app.post('/api/trips/:id/next-stop', driver, wrap((req) => svc.driverView(svc.nextStop(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/start', driver, wrap((req) => svc.driverView(svc.startTrip(req.user, req.params.id, req.body.pin), svc.driverOf(req.user))));
   app.post('/api/trips/:id/complete', driver, wrap(async (req) => svc.driverView(await svc.completeTrip(req.user, req.params.id, req.body), svc.driverOf(req.user))));
 
@@ -288,6 +360,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     res.send(batchCsv(b));
   });
   app.get('/api/admin/sms', admin, (req, res) => res.json(svc.smsLog()));
+  app.get('/api/admin/client-errors', admin, (req, res) => res.json(store.db.clientErrors.slice(-200).reverse()));
   app.get('/api/admin/promos', admin, (req, res) => res.json(store.all('promos')));
   app.post('/api/admin/promos', admin, wrap((req) => svc.createPromo(req.body)));
   app.get('/api/admin/economics', admin, (req, res) => res.json({

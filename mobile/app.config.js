@@ -35,6 +35,8 @@ module.exports = ({ config }) => ({
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', ...(DRIVER ? ['CAMERA', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION'] : [])],
+    // expo-contacts also asks to edit contacts; MyRide only reads the one person the customer picks to share a trip with.
+    blockedPermissions: ['android.permission.WRITE_CONTACTS'],
   },
   web: { favicon: './assets/favicon.png', bundler: 'metro' },
   plugins: [
@@ -42,6 +44,7 @@ module.exports = ({ config }) => ({
     'expo-secure-store',
     'expo-web-browser',
     ['expo-notifications', { color: DRIVER ? '#075a52' : '#0b7a6f' }],
+    ...(DRIVER ? [] : [['expo-contacts', { contactsPermission: 'MyRide opens your contacts only when you choose someone to share your trip with.' }]]),
     [
       'expo-location',
       {
@@ -67,6 +70,7 @@ module.exports = ({ config }) => ({
     variant: VARIANT,
     apiUrl: process.env.EXPO_PUBLIC_API_URL || null, // e.g. https://api.myride.com.np in production
     // Push notifications need the EAS project id (`npx eas-cli@latest init` prints it); without it push is skipped.
-    eas: { projectId: (DRIVER ? process.env.EAS_PROJECT_ID_DRIVER : process.env.EAS_PROJECT_ID_RIDER) || undefined },
+    // EAS_PROJECT_ID_RIDER is the old name for the customer app's id (kept so existing EAS secrets still work).
+    eas: { projectId: (DRIVER ? process.env.EAS_PROJECT_ID_DRIVER : process.env.EAS_PROJECT_ID_CUSTOMER || process.env.EAS_PROJECT_ID_RIDER) || undefined },
   },
 });

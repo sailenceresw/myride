@@ -1,7 +1,7 @@
 // MyRide business logic. Pure of HTTP so the API, the simulator and the tests share it.
 const crypto = require('crypto');
-const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC } = require('./config');
-const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, nearestPlace, places } = require('./geo');
+const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC, CITY, SAFETY } = require('./config');
+const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, bearing, nearestPlace, places } = require('./geo');
 const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
 const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
 const rewards = require('./rewards');
@@ -20,6 +20,8 @@ class HttpError extends Error {
 }
 const fail = (status, msg, extra, expose) => { throw new HttpError(status, msg, extra, expose); };
 const pin4 = () => String(crypto.randomInt(1000, 10000));
+// Secret for the anonymous nearby-vehicle keys (a fresh one per server start is fine: keys just change).
+const NEARBY_SECRET = process.env.NEARBY_KEY_SECRET || crypto.randomBytes(32).toString('hex');
 const r2 = (n) => Math.round(n * 100) / 100;
 const kindOf = (svc) => (svc.kind === 'ride' ? 'ride' : svc.logistics ? 'logistics' : 'delivery');
 
@@ -32,7 +34,7 @@ const OTP = {
 };
 
 function createService({ store, bus = { emit() {} }, now = () => Date.now(), routeFn = route, files = null, isAdminPhone = () => false, rand = Math.random, sms = sendSms, face = createFaceVerifier(), otpSecret = process.env.OTP_SECRET || 'dev-otp-secret-change-me' }) {
-  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog']) if (!store.db[c]) store.db[c] = {};
+  for (const c of ['ledger', 'kyc', 'fleet', 'payoutBatches', 'orders', 'files', 'otpLog', 'messages']) if (!store.db[c]) store.db[c] = {};
   if (!Array.isArray(store.db.smsLog)) store.db.smsLog = [];
   const otpHash = (phone, code) => crypto.createHmac('sha256', otpSecret).update(`${phone}:${code}`).digest('hex');
 
@@ -123,6 +125,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       membership: rewards.membershipView(user, now()),
       driverApplication: kycOf(user) ? { status: kycOf(user).status } : null,
       isDriver: !!driverOf(user),
+      closeContacts: user.closeContacts || [], // people this customer shared trips with, for one-tap sharing
     };
   }
 
@@ -166,6 +169,42 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
   function cancelMembership(user) { rewards.cancelAutoRenew(user); store.save(); return profile(user); }
 
+  /**
+   * Delete a customer account (Google Play / App Store requirement): personal data removed, signed out everywhere.
+   * Trip records stay for accounting and safety, without the person's name, number, notes, chats or contacts.
+   * Riders (drivers) close their account through support: payouts, tax and KYC records must be settled first.
+   */
+  function deleteAccount(user) {
+    if (driverOf(user)) fail(409, 'You are also a MyRide rider. Please contact MyRide support to close your rider account (payouts and records).');
+    if (store.all('trips').some((t) => t.riderId === user.id && (ACTIVE.includes(t.status) || t.status === 'scheduled'))) fail(409, 'Finish or cancel your current or scheduled trip first');
+    // Money owed stays collectable: settle cancellation fees and unpaid eSewa/Khalti rides first.
+    const unpaid = store.all('trips').filter((t) => t.riderId === user.id && t.status === 'completed' && t.payment.method !== 'cash' && t.payment.status !== 'paid' && t.fare > 0);
+    const owed = r2((user.dues || 0) + unpaid.reduce((s, t) => s + t.fare, 0));
+    if (owed > 0) fail(409, `Please pay what you owe first (Rs ${owed})${unpaid.length ? ': open the unpaid trip in Your trips' : ''}`);
+    // A rider application that was never approved goes too: identity documents, bank details, face data and photos.
+    const kycApp = kycOf(user);
+    if (kycApp) {
+      for (const fileId of Object.values(kycApp.documents || {})) files?.remove?.(fileId);
+      delete store.db.kyc[kycApp.id];
+    }
+    for (const f of store.all('files')) if (f.ownerId === user.id) files?.remove?.(f.id); // e.g. delivery photos uploaded by them
+    const mine = store.all('trips').filter((t) => t.riderId === user.id);
+    const ids = new Set(mine.map((t) => t.id));
+    for (const t of mine) {
+      Object.assign(t, { riderName: 'Deleted user', riderPhone: null, note: undefined, sharedWith: undefined, business: null });
+      if (t.recipient) t.recipient = { name: 'Recipient' };
+    }
+    for (const m of store.all('messages')) if (ids.has(m.tripId)) delete store.db.messages[m.id];
+    for (const [token, s] of Object.entries(store.db.sessions)) if (s.userId === user.id) delete store.db.sessions[token];
+    if (user.membership) rewards.cancelAutoRenew(user); // stop Plus renewing
+    Object.assign(user, {
+      name: 'Deleted user', phone: `deleted:${user.id}`, email: '', business: null, closeContacts: [], pushTokens: [],
+      deletedAt: now(), roles: user.roles.filter((r) => r !== 'admin'),
+    });
+    store.save();
+    return { deleted: true };
+  }
+
   // ---------- quotes ----------
   function checkPoints(svc, pickup, drop) {
     if (!isValidPoint(pickup) || !isValidPoint(drop)) fail(400, 'Pickup and drop need lat/lng');
@@ -175,15 +214,45 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     if (haversineKm(pickup, drop) < 0.2) fail(400, 'Pickup and drop are too close');
   }
 
+  // ---------- stops on the way (rides, like Uber: up to 2 before the destination) ----------
+  const MAX_STOPS = 2;
+  const STOP_MIN = 2; // minutes allowed at each stop in the time estimate
+  const STOP_RADIUS_KM = 0.3; // the rider must be this close to mark "arrived at stop"
+  const STOP_WAIT_MAX_MIN = 15; // most waiting counted at one stop
+  function cleanStops(svc, stops) {
+    if (stops === undefined || stops === null || (Array.isArray(stops) && !stops.length)) return [];
+    if (!Array.isArray(stops)) fail(400, 'Stops must be a list');
+    if (svc.kind !== 'ride') fail(400, 'Stops are for rides only');
+    if (stops.length > MAX_STOPS) fail(400, `You can add up to ${MAX_STOPS} stops`);
+    return stops.map((s, i) => {
+      if (!isValidPoint(s)) fail(400, `Stop ${i + 1} needs a location`);
+      if (!inServiceArea(s)) fail(422, `Stop ${i + 1} is beyond 20 km of Pokhara`);
+      return { lat: s.lat, lng: s.lng, label: String(s.label || nearestPlace(s)?.name || wardOf(s)?.label || `Stop ${i + 1}`).slice(0, 80), ward: wardOf(s)?.ward ?? null };
+    });
+  }
+  /** Road route through the stops: legs joined, distances and times added, a short wait at each stop. */
+  async function routeVia(points) {
+    const legs = [];
+    for (let i = 1; i < points.length; i++) legs.push(await routeFn(points[i - 1], points[i]));
+    if (legs.length === 1) return legs[0];
+    return {
+      km: legs.reduce((s, l) => s + l.km, 0),
+      min: legs.reduce((s, l) => s + l.min, 0) + STOP_MIN * (legs.length - 1),
+      geometry: legs.flatMap((l, i) => (i ? l.geometry.slice(1) : l.geometry)),
+      source: legs.every((l) => l.source === legs[0].source) ? legs[0].source : 'mixed',
+    };
+  }
+
   function discountStack(user, serviceId, promoCode, useCredits) {
     return rewards.discountsFor({ store, user, serviceId, promoCode, useCredits, now: now() });
   }
 
-  async function quoteAll({ pickup, drop, kind = 'ride', parcel, promoCode, useCredits = true }, user) {
+  async function quoteAll({ pickup, drop, stops, kind = 'ride', parcel, promoCode, useCredits = true }, user) {
     const list = Object.entries(SERVICES).filter(([, s]) => kindOf(s) === kind);
     if (!list.length) fail(400, 'Unknown trip kind');
     checkPoints(list[0][1], pickup, drop);
-    const r = await routeFn(pickup, drop);
+    const via = cleanStops(list[0][1], stops);
+    const r = await routeVia([pickup, ...via, drop]);
     const member = user && rewards.isMember(user, now());
     let promoError = null;
     const quotes = [];
@@ -191,7 +260,10 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       let ds;
       try { ds = discountStack(user, id, promoCode, useCredits); } catch (e) { promoError = e.message; ds = discountStack(user, id, null, useCredits); }
       try {
-        quotes.push({ ...quote(id, r, { parcel, waiveCod: member, discounts: ds }), available: countAvailable(id, pickup, member) });
+        const near = findCandidates(store.all('drivers'), { serviceId: id, pickup, priority: member }, now());
+        // Minutes for the nearest free driver to reach the pickup (city traffic speed), like Uber's "3 min away".
+        const pickupMin = near.length ? Math.max(1, Math.round((near[0].pickupKm / CITY.fallbackSpeedKmh) * 60)) : null;
+        quotes.push({ ...quote(id, r, { parcel, waiveCod: member, discounts: ds }), available: near.length, pickupMin, seats: svc.seats ?? null });
       } catch (e) {
         quotes.push({ service: id, label: svc.label, unavailable: e.message });
       }
@@ -204,10 +276,6 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       pickupPlace: nearestPlace(pickup)?.name || null, dropPlace: nearestPlace(drop)?.name || null,
       pickupWard: wardOf(pickup)?.label || null, dropWard: wardOf(drop)?.label || null,
     };
-  }
-
-  function countAvailable(serviceId, pickup, priority) {
-    return findCandidates(store.all('drivers'), { serviceId, pickup, priority }, now()).length;
   }
 
   async function fixedRoutes() {
@@ -223,11 +291,12 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
 
   // ---------- trips ----------
   async function createTrip(user, body) {
-    const { service, pickup, drop, payment = 'cash', womenOnly = false, scheduledAt, parcel, recipient, promoCode, note, useCredits = true } = body;
+    const { service, pickup, drop, stops, payment = 'cash', womenOnly = false, scheduledAt, parcel, recipient, promoCode, note, useCredits = true } = body;
     const svc = SERVICES[service] || fail(400, 'Choose a service');
     if (!['cash', 'esewa', 'khalti', 'fonepay'].includes(payment)) fail(400, 'Unsupported payment method');
     if (store.all('trips').some((t) => t.riderId === user.id && ACTIVE.includes(t.status))) fail(409, 'You already have an active trip');
     checkPoints(svc, pickup, drop);
+    const via = cleanStops(svc, stops);
     if (svc.kind === 'delivery') {
       if (!recipient || !recipient.name || !PHONE_RE.test(String(recipient.phone || ''))) fail(400, 'Recipient name and a valid mobile number are required');
       if (!parcel || !(parcel.weightKg > 0)) fail(400, 'Goods weight is required');
@@ -242,7 +311,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     }
     const discounts = discountStack(user, service, promoCode, useCredits);
     const member = rewards.isMember(user, now());
-    const r = await routeFn(pickup, drop);
+    const r = await routeVia([pickup, ...via, drop]);
     const q = quote(service, r, { parcel, waiveCod: member, discounts });
     const dues = user.dues || 0;
 
@@ -256,6 +325,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       business: user.business || null,
       pickup: { lat: pickup.lat, lng: pickup.lng, label: label(pickup), ward: wardOf(pickup)?.ward ?? null },
       drop: { lat: drop.lat, lng: drop.lng, label: drop.label || label(drop), ward: wardOf(drop)?.ward ?? null },
+      stops: via, stopsDone: 0, // stops on the way; the driver marks each one done
       route: { km: r.km, min: r.min, geometry: r.geometry, source: r.source },
       quote: q,
       discountsRequested: discounts,
@@ -338,7 +408,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const employee = driver?.driverType === 'employee';
     return {
       id: trip.id, kind: trip.kind, logistics: trip.logistics, service: trip.service, status: trip.status,
-      pickup: trip.pickup, drop: trip.drop, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
+      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, stopArrivedAt: trip.stopArrivedAt || null, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
       fare: trip.fare,
       earning: employee ? null : trip.quote.split.driver, // fleet employees are paid wages, not per trip
       employee,
@@ -346,8 +416,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       deadKmBonus: employee ? 0 : deadKmPay(trip.service, pickupKm),
       payment: trip.payment.method,
       parcel: trip.parcel, recipient: trip.status === 'in_progress' ? trip.recipient : trip.recipient && { name: trip.recipient.name },
-      riderName: trip.riderName,
-      riderPhone: ['accepted', 'arrived', 'in_progress'].includes(trip.status) ? trip.riderPhone : undefined,
+      riderName: trip.riderName, // no phone number: calls go through POST /api/trips/:id/call
       note: trip.note,
       offerExpiresAt: trip.offerExpiresAt,
     };
@@ -359,7 +428,9 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return {
       ...rest,
       deliveryOtp: trip.kind === 'delivery' ? deliveryOtp : undefined, // sender shares it with the recipient
-      driver: d ? { id: d.id, name: d.name, phone: d.phone, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, fleet: d.driverType === 'employee' } : null,
+      waitRule: { freeMin: SERVICES[trip.service].waitFreeMin, perMin: SERVICES[trip.service].waitPerMin }, // pickup and each stop
+      // No phone number: calls go through POST /api/trips/:id/call (masked when a call bridge is configured).
+      driver: d ? { name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
     };
   }
 
@@ -384,6 +455,73 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const d = trip.driverId && store.get('drivers', trip.driverId);
     if (d) bus.emit(d.userId, { type: 'trip', role: 'driver', trip: driverView(trip, d) });
     bus.emit(`share:${trip.shareToken}`, { type: 'trip', trip: publicView(trip) });
+  }
+
+  // ---------- calls between customer and rider (numbers stay private) ----------
+  // With a call bridge (CALL_BRIDGE_NUMBER: a provider number whose IVR connects calls by trip code), neither side
+  // ever sees the other's number. Without one, the number is handed out only for this call, during the trip.
+  function callInfo(user, id) {
+    const t = getTripFor(user, id);
+    const from = chatRole(user, t);
+    if (!CHAT_OPEN.includes(t.status) || !t.driverId) fail(409, 'You can call while the trip is on');
+    const d = store.get('drivers', t.driverId);
+    t.calls = [...(t.calls || []), { at: now(), from }].slice(-50);
+    if (!t.callCode) { // the bridge looks the trip up by this: unique among trips that are on
+      const inUse = new Set(store.all('trips').filter((x) => CHAT_OPEN.includes(x.status) && x.callCode).map((x) => x.callCode));
+      do t.callCode = String(crypto.randomInt(100000, 1000000)); while (inUse.has(t.callCode));
+    }
+    store.save();
+    const bridge = process.env.CALL_BRIDGE_NUMBER;
+    if (bridge) return { masked: true, dial: bridge, code: t.callCode };
+    return { masked: false, dial: from === 'rider' ? d.phone : t.riderPhone };
+  }
+  /** For the call bridge provider: who to connect for a trip code and caller (only while the trip is on). */
+  function bridgeLookup(code, callerPhone) {
+    const t = store.all('trips').find((x) => x.callCode === String(code) && CHAT_OPEN.includes(x.status));
+    if (!t) return null;
+    const d = store.get('drivers', t.driverId);
+    if (callerPhone === t.riderPhone) return { connect: d.phone, tripId: t.id };
+    if (callerPhone === d.phone) return { connect: t.riderPhone, tripId: t.id };
+    return null;
+  }
+
+  // ---------- chat between customer and rider during a trip ----------
+  const CHAT_OPEN = ['accepted', 'arrived', 'in_progress'];
+  const CHAT_MAX_PER_SENDER = 60;
+  const DEMO_REPLIES = ["Okay 👍", "I'm on my way, about 2 minutes.", 'I can see you, coming now.', 'Please wait at the pickup point.'];
+
+  /** Who `user` is on trip `t`: 'rider' (the customer — legacy server name) or 'driver'. */
+  function chatRole(user, t) {
+    if (t.riderId === user.id) return 'rider';
+    const d = driverOf(user);
+    if (d && t.driverId === d.id) return 'driver';
+    return fail(403, 'Not your trip');
+  }
+  function messages(user, id) {
+    const t = getTripFor(user, id);
+    chatRole(user, t);
+    return store.all('messages').filter((m) => m.tripId === t.id).sort((a, b) => a.at - b.at).map(({ id: mid, from, text, at }) => ({ id: mid, from, text, at }));
+  }
+  function sendMessage(user, id, text) {
+    const t = getTripFor(user, id);
+    const from = chatRole(user, t);
+    if (!CHAT_OPEN.includes(t.status) || !t.driverId) fail(409, 'You can message once a rider has accepted, until the trip ends');
+    text = String(text || '').trim().slice(0, 300);
+    if (!text) fail(400, 'Write a message');
+    if (store.all('messages').filter((m) => m.tripId === t.id && m.from === from).length >= CHAT_MAX_PER_SENDER) fail(429, 'Too many messages on this trip. Please call instead');
+    const m = store.put('messages', { id: store.id('msg'), tripId: t.id, from, text, at: now() });
+    store.save();
+    const d = store.get('drivers', t.driverId);
+    const to = from === 'rider' ? d.userId : t.riderId;
+    const message = { id: m.id, from, text, at: m.at };
+    // `role` is the recipient's role, as for trip events; `fromName` is for the push notification.
+    bus.emit(to, { type: 'message', role: from === 'rider' ? 'driver' : 'rider', tripId: t.id, fromName: from === 'rider' ? t.riderName : d.name, message });
+    // Demo fleet (SIMULATE=1): simulated riders answer so the chat can be tried end to end.
+    const driverUser = store.get('users', d.userId);
+    if (from === 'rider' && driverUser?.simulated) {
+      setTimeout(() => { try { sendMessage(driverUser, t.id, DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)]); } catch { /* trip ended */ } }, 2500);
+    }
+    return message;
   }
 
   function getTripFor(user, id) {
@@ -468,7 +606,41 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     t.sos = [...(t.sos || []), incident];
     store.save();
     bus.emit('admin', { type: 'sos', tripId: t.id, incident, rider: t.riderPhone });
+    // Close ones the customer shared this trip with hear about it straight away.
+    if (t.riderId === user.id) for (const c of t.sharedWith || []) notify(c.phone, templates.tripSos({ name: t.riderName, link: trackLink(t) }), 'trip_sos');
     return incident;
+  }
+
+  // ---------- share a trip with close ones (customer's choice, per trip) ----------
+  const trackLink = (t) => `${SAFETY.publicUrl}/track.html?t=${t.shareToken}`;
+  const localPhone = (p) => String(p || '').replace(/\D/g, '').replace(/^977(?=9\d{9}$)/, '');
+  function shareTrip(user, id, contacts) {
+    const t = getTripFor(user, id);
+    if (t.riderId !== user.id) fail(403, 'Only the customer can share this trip');
+    if (!['searching', 'accepted', 'arrived', 'in_progress'].includes(t.status)) fail(409, 'You can share a trip while it is on');
+    if (!Array.isArray(contacts) || !contacts.length) fail(400, 'Choose who to share with');
+    const shared = t.sharedWith || [];
+    const fresh = [];
+    for (const c of contacts) {
+      const phone = localPhone(c?.phone);
+      if (!PHONE_RE.test(phone)) fail(400, `${c?.name || phone || 'That number'} is not a Nepali mobile number (98XXXXXXXX)`);
+      if (phone === user.phone || shared.some((s) => s.phone === phone) || fresh.some((s) => s.phone === phone)) continue;
+      fresh.push({ name: String(c.name || phone).trim().slice(0, 40), phone, at: now() });
+    }
+    if (shared.length + fresh.length > SAFETY.shareMax) fail(400, `You can share a trip with up to ${SAFETY.shareMax} people`);
+    t.sharedWith = [...shared, ...fresh];
+    const d = t.driverId && store.get('drivers', t.driverId);
+    for (const c of fresh) notify(c.phone, templates.tripShared({ name: t.riderName, from: t.pickup.label, to: t.drop.label, driver: d?.name, plate: d?.vehicle.plate, link: trackLink(t) }), 'trip_share');
+    // Remember them (most recent first) so next time sharing is one tap. Nothing is sent unless the customer chooses.
+    const keep = [...fresh.map(({ name, phone }) => ({ name, phone })), ...(user.closeContacts || []).filter((c) => !fresh.some((f) => f.phone === c.phone))];
+    user.closeContacts = keep.slice(0, 8);
+    store.save();
+    return { sharedWith: t.sharedWith.map(({ name, phone }) => ({ name, phone })) };
+  }
+  function forgetCloseContact(user, phone) {
+    user.closeContacts = (user.closeContacts || []).filter((c) => c.phone !== localPhone(phone));
+    store.save();
+    return { closeContacts: user.closeContacts };
   }
 
   // ---------- driver onboarding & KYC ----------
@@ -677,6 +849,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   function updateLocation(user, loc) {
     const d = driverOf(user) || fail(403, 'Not a driver');
     if (!isValidPoint(loc)) fail(400, 'Invalid location');
+    if (d.loc && haversineKm(d.loc, loc) > 0.005) d.heading = Math.round(bearing(d.loc, loc)); // moved > 5 m: keep the last real heading when parked
     d.loc = { lat: loc.lat, lng: loc.lng };
     accrueOnline(d);
     if (d.homeFilter && !d.currentTripId && haversineKm(d.loc, d.homeFilter) < 0.8) d.homeFilter = null; // arrived home
@@ -734,6 +907,39 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return t;
   }
 
+  /** Driver: arrived at the current stop (starts the stop's waiting clock; the customer sees it). */
+  function stopArrived(user, id) {
+    const { t } = ownTrip(user, id);
+    if (t.status !== 'in_progress') fail(409, 'Start the trip first');
+    if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    const stop = t.stops[t.stopsDone || 0];
+    const { d } = ownTrip(user, id);
+    // The waiting clock only starts at the stop itself (no billing driving time as "waiting").
+    if (d.loc && haversineKm(d.loc, stop) > STOP_RADIUS_KM) fail(409, `You're not at stop ${(t.stopsDone || 0) + 1} yet`);
+    if (!t.stopArrivedAt) {
+      t.stopArrivedAt = now();
+      t.events.push({ at: now(), status: 'in_progress', note: `stop_${(t.stopsDone || 0) + 1}_arrived` });
+      store.save();
+      emitTrip(t);
+    }
+    return t;
+  }
+
+  /** Driver: done at the current stop, on to the next one (or the destination). Time waited there is recorded. */
+  function nextStop(user, id) {
+    const { t } = ownTrip(user, id);
+    if (t.status !== 'in_progress') fail(409, 'Start the trip first');
+    if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    // Minutes waited at this stop, capped (a forgotten "Continue" must not bill the rest of the drive).
+    t.stopWaits = [...(t.stopWaits || []), t.stopArrivedAt ? Math.min(STOP_WAIT_MAX_MIN, (now() - t.stopArrivedAt) / 60000) : 0];
+    t.stopArrivedAt = null;
+    t.stopsDone = (t.stopsDone || 0) + 1;
+    t.events.push({ at: now(), status: 'in_progress', note: `stop_${t.stopsDone}_done` });
+    store.save();
+    emitTrip(t);
+    return t;
+  }
+
   async function completeTrip(user, id, { deliveryOtp, codCollected, podPhoto } = {}) {
     const { d, t } = ownTrip(user, id);
     if (t.status !== 'in_progress') fail(409, 'Trip has not started');
@@ -745,7 +951,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const rider = store.get('users', t.riderId);
     // Final fare includes waiting time; discounts are re-applied to the final amount (credits re-checked).
     const requested = (t.discountsRequested || []).map((x) => (x.kind === 'credit' ? { ...x, amount: rider.credits || 0 } : x));
-    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, waiveCod: t.riderMember });
+    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, stopWaits: t.stopWaits, waiveCod: t.riderMember });
     const final = applyDiscounts(base, requested);
     t.quote = final;
     t.fare = final.total + (t.dues || 0);
@@ -774,6 +980,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     d.earnings.trips += 1;
     d.status = 'idle'; d.currentTripId = null;
     setStatus(t, 'completed', { fare: t.fare });
+    for (const c of t.sharedWith || []) notify(c.phone, templates.tripArrived({ name: t.riderName, to: t.drop.label }), 'trip_arrived');
     return t;
   }
 
@@ -794,7 +1001,9 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return store.all('drivers')
       .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
       .slice(0, 25)
-      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev' }));
+      // key: a per-day anonymous id per vehicle so the map can glide each car. Keyed with a server secret and the day,
+      // so nobody can link it to a driver (or follow one driver from day to day).
+      .map((d) => ({ key: crypto.createHmac('sha256', NEARBY_SECRET).update(`${new Date(t).toISOString().slice(0, 10)}:${d.id}`).digest('hex').slice(0, 12), lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
   }
 
   function stats() {
@@ -846,12 +1055,12 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   return {
-    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, applyReferral,
+    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, deleteAccount, applyReferral,
     createMembershipOrder, startTrial, markOrderPaid, cancelMembership,
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, callInfo, bridgeLookup, stopArrived, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }

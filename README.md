@@ -143,6 +143,8 @@ npm run typecheck && npm run lint
 
 The apps find the API automatically: same machine as the Expo dev server for phones on Wi-Fi, `10.0.2.2` for the Android emulator, `localhost` for the iOS simulator. Set `EXPO_PUBLIC_API_URL` for anything else.
 
+Place search covers every named place in OpenStreetMap within 20 km of Pokhara (about 11,400 toles, chowks, hotels, schools, shops, hospitals and offices, plus 870 streets), in Nepali or English with any romanisation. Refresh it from OpenStreetMap with `node tools/gazetteer.js`; it writes `data/pokhara-places.json` and `data/pokhara-streets.json` (© OpenStreetMap contributors, ODbL: keep the attribution).
+
 Field-test navigation on the Android emulator by replaying a real road route through its GPS (noise, speed and a wrong turn to trigger rerouting): accept a trip in MyRide Drive, then run `node tools/gps-replay.js --from lakeside --to mahendrapul --kmh 30 --detour`.
 
 Store builds use EAS profiles (`customer`, `drive`, and `*-preview` APKs): `npx eas-cli@latest build --profile drive --platform android`.
@@ -164,7 +166,11 @@ Store builds use EAS profiles (`customer`, `drive`, and `*-preview` APKs): `npx 
 | `MYRIDE_FEDERAL_DRAFT=0` | Apply Gandaki rules only (default also complies with the national draft) |
 | `GOOGLE_MAPS_ANDROID_KEY`, `GOOGLE_MAPS_IOS_KEY` | Mobile store builds (restrict to the app package / bundle ID) |
 | `EXPO_PUBLIC_API_URL` | Mobile API base URL (e.g. `https://api.myride.com.np`) |
-| `EAS_PROJECT_ID_RIDER`, `EAS_PROJECT_ID_DRIVER` | EAS project IDs: enable push notifications in the store apps |
+| `PUBLIC_URL` | This server's public address, used in live-trip links sent by SMS when a customer shares a trip (default `http://localhost:3000`) |
+| `CALL_BRIDGE_NUMBER`, `CALL_BRIDGE_SECRET` | Masked calling: the provider number customers and riders dial (plus a trip code), and the shared secret its IVR sends to `POST /api/call-bridge/lookup` to learn whom to connect. Without them, calls go direct during the trip only |
+| `NEARBY_KEY_SECRET` | Secret for the anonymous per-day keys of nearby vehicles (random per server start if unset) |
+| `SUPPORT_PHONE` | MyRide customer support number shown as "Help and support" / "Get help" in the app (hidden when unset) |
+| `EAS_PROJECT_ID_CUSTOMER`, `EAS_PROJECT_ID_DRIVER` | EAS project IDs: enable push notifications in MyRide and MyRide Drive (`EAS_PROJECT_ID_RIDER` still works as the old name for the customer one) |
 | `EXPO_ACCESS_TOKEN` | Only if Expo "enhanced push security" is on |
 | `FACE_PROVIDER` | `local` (default, on-device descriptors) or `rekognition` (server-side photo match) |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `FACE_MIN_SIMILARITY` | AWS Rekognition for selfie checks (default `ap-south-1`, 90%) |
