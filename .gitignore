@@ -1,3 +1,6 @@
 node_modules/
 data/db.json
 data/uploads/
+data/db.sqlite*
+data/db.json.migrated
+data/db.json.tmp
