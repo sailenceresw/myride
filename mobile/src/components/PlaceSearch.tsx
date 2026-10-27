@@ -100,7 +100,7 @@ export function PlaceSearch({ title, places, kind, near, shortcuts, onPick, onMa
               <Txt kind="muted" style={{ textAlign: 'center' }}>No places match “{q}”. Try another spelling, or set the location on the map.</Txt>
               <Button title="Set location on map" icon="map-outline" kind="soft" onPress={onMap} />
             </View>
-          ) : null
+          ) : undefined
         }
       />
     </SafeAreaView>

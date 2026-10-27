@@ -1,6 +1,5 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StatusBar as RNStatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '@/lib/auth';
 import { installCrashReporting } from '@/lib/crash';
@@ -15,9 +14,8 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
+        {/* SDK 58 apps are edge-to-edge: the map and heroes draw under the status bar (StatusBar `translucent` is gone). */}
         <StatusBar style="auto" />
-        {/* Draw under the status bar (map and hero go edge to edge) on phones where Expo Go isn't edge-to-edge. */}
-        <RNStatusBar translucent backgroundColor="transparent" />
         <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }} />
       </AuthProvider>
     </SafeAreaProvider>

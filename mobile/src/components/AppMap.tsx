@@ -1,8 +1,12 @@
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState, type ComponentType, type Ref } from 'react';
 import { Platform, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import type MapView from 'react-native-maps';
-import { WebView } from 'react-native-webview';
+import { WebView, type WebViewProps } from 'react-native-webview';
 import { POKHARA } from '@/lib/config';
+
+// react-native-webview 14 types WebView as a plain function component, but it still forwards a ref with these commands.
+type WebViewHandle = { injectJavaScript: (js: string) => void };
+const MapWebView = WebView as unknown as ComponentType<WebViewProps & { ref?: Ref<WebViewHandle> }>;
 
 export type Pt = { lat: number; lng: number };
 /**
@@ -188,7 +192,7 @@ window.mr={
 </script></body></html>`;
 
 function WebMap({ markers = [], lines = [], user, padding, onUserPan, onIdle, ref }: Props) {
-  const web = useRef<WebView>(null);
+  const web = useRef<WebViewHandle>(null);
   const dark = useColorScheme() === 'dark';
   const [ready, setReady] = useState(false);
   const queued = useRef<string | null>(null); // last camera move requested before the page loaded
@@ -208,7 +212,7 @@ function WebMap({ markers = [], lines = [], user, padding, onUserPan, onIdle, re
   }, [ready, state]);
 
   return (
-    <WebView
+    <MapWebView
       ref={web}
       style={[StyleSheet.absoluteFill, { backgroundColor: dark ? '#1c1e1f' : '#f2f3f3' }]}
       source={{ html: HTML, baseUrl: 'https://myride.local/' }}
