@@ -165,6 +165,32 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => { clearInterval(ping); channels.forEach((ch) => bus.unsubscribe(ch, res)); });
   });
+  // Crash and error reports from the apps (no third-party service needed): newest 500 kept, shown in the ops console.
+  if (!Array.isArray(store.db.clientErrors)) store.db.clientErrors = [];
+  // Budgets per signed-in user (else per IP; set TRUST_PROXY behind a load balancer), plus a global cap.
+  const errorBudget = new Map(); // who → { minute, n }: at most 20 reports a minute each
+  let errorsThisMinute = { minute: 0, n: 0 }; // and at most 300 a minute in total
+  app.post('/api/client-errors', (req, res) => {
+    const minute = Math.floor(Date.now() / 60000);
+    const who = svc.session(tokenOf(req))?.user.id || `ip:${req.ip}`;
+    if (errorsThisMinute.minute !== minute) errorsThisMinute = { minute, n: 0 };
+    const b = errorBudget.get(who);
+    if (errorsThisMinute.n >= 300 || (b && b.minute === minute && b.n >= 20)) return res.status(429).end();
+    errorsThisMinute.n += 1;
+    errorBudget.set(who, b && b.minute === minute ? { minute, n: b.n + 1 } : { minute, n: 1 });
+    if (errorBudget.size > 5000) for (const [k, v] of errorBudget) if (v.minute !== minute) errorBudget.delete(k); // drop old minutes only
+    const body = req.body || {};
+    const str = (v, n) => String(v ?? '').slice(0, n);
+    const e = {
+      at: Date.now(), app: str(body.app, 20), version: str(body.version, 20), platform: str(body.platform, 20), fatal: !!body.fatal,
+      screen: str(body.screen, 100), message: str(body.message, 500), stack: str(body.stack, 4000), userId: svc.session(tokenOf(req))?.user.id || null,
+    };
+    store.db.clientErrors.push(e);
+    if (store.db.clientErrors.length > 500) store.db.clientErrors.shift();
+    store.save();
+    bus.emit('admin', { type: 'client_error', app: e.app, fatal: e.fatal, message: e.message });
+    res.status(204).end();
+  });
   // Expo push token of this device, per portal (the rider and Drive apps are separate installs).
   app.post('/api/push/token', anyAuth, (req, res) => {
     if (!push.register(req.user, req.body.token, req.portal)) return res.status(400).json({ error: 'Invalid Expo push token' });
@@ -309,6 +335,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/driver/offers', driver, (req, res) => res.json(svc.offersFor(req.user)));
   app.post('/api/trips/:id/accept', driver, wrap((req) => svc.driverView(svc.acceptTrip(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/arrived', driver, wrap((req) => svc.driverView(svc.arrived(req.user, req.params.id), svc.driverOf(req.user))));
+  app.post('/api/trips/:id/stop-arrived', driver, wrap((req) => svc.driverView(svc.stopArrived(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/next-stop', driver, wrap((req) => svc.driverView(svc.nextStop(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/start', driver, wrap((req) => svc.driverView(svc.startTrip(req.user, req.params.id, req.body.pin), svc.driverOf(req.user))));
   app.post('/api/trips/:id/complete', driver, wrap(async (req) => svc.driverView(await svc.completeTrip(req.user, req.params.id, req.body), svc.driverOf(req.user))));
@@ -333,6 +360,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     res.send(batchCsv(b));
   });
   app.get('/api/admin/sms', admin, (req, res) => res.json(svc.smsLog()));
+  app.get('/api/admin/client-errors', admin, (req, res) => res.json(store.db.clientErrors.slice(-200).reverse()));
   app.get('/api/admin/promos', admin, (req, res) => res.json(store.all('promos')));
   app.post('/api/admin/promos', admin, wrap((req) => svc.createPromo(req.body)));
   app.get('/api/admin/economics', admin, (req, res) => res.json({

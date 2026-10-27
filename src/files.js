@@ -39,7 +39,15 @@ function createFiles(store, dir) {
     return { rec, buf };
   }
 
-  return { save, read };
+  /** Delete a stored file (account deletion). */
+  function remove(id) {
+    const rec = store.get('files', id);
+    if (!rec) return;
+    if (rec.file) { try { fs.unlinkSync(path.join(dir, rec.file)); } catch { /* already gone */ } }
+    store.del('files', id);
+  }
+
+  return { save, read, remove };
 }
 
 module.exports = { createFiles };

@@ -205,12 +205,25 @@ test('stops: up to 2 on the way, priced on the whole route; the rider marks each
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'not before the trip starts');
   await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  // Stop 1: "arrived" only counts at the stop; then the rider waits 8 min (3 free) → 5 min at the bike rate (Rs 2/min).
+  await api('POST', '/api/driver/location', P('lakeside'), bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/stop-arrived`, {}, bikeDrv.token)).status, 409, 'not at the stop yet');
+  await api('POST', '/api/driver/location', P('mahendrapul'), bikeDrv.token);
+  assert.ok((await api('POST', `/api/trips/${t.id}/stop-arrived`, {}, bikeDrv.token)).body.stopArrivedAt, 'waiting clock started');
+  clock += 8 * 60000;
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).body.stopsDone, 1);
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, rider.token)).status, 403, 'only the rider driving');
   assert.equal((await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.stopsDone, 1, 'the customer sees progress');
+  // Stop 2: a quick one (1 min) → nothing charged.
+  await api('POST', '/api/driver/location', P('bagar'), bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/stop-arrived`, {}, bikeDrv.token);
+  clock += 60000;
   await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token);
   assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'no third stop');
   assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
+  const receipt = (await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.quote.lines;
+  assert.deepEqual(receipt.find((l) => l.label.startsWith('Waiting at stops')), { label: 'Waiting at stops 5 min', amount: 10 });
+  await api('POST', '/api/driver/location', P('lakeside'), bikeDrv.token); // back where the other tests expect the rider
 });
 
 test('account deletion: personal data removed, signed out everywhere, trips kept without the person', async () => {
@@ -227,6 +240,18 @@ test('account deletion: personal data removed, signed out everywhere, trips kept
   assert.equal(store.all('users').some((u) => u.phone === '9846000077'), false, 'number freed');
   const again = await login('9846000077', 'Sita New');
   assert.notEqual(again.user.id, me.user.id, 'signing up again makes a fresh account');
+
+  // Money owed must be settled first; a never-approved rider application and its documents are deleted too.
+  const debtor = await login('9846000078', 'Owes Fees');
+  store.get('users', debtor.user.id).dues = 20;
+  assert.match((await api('DELETE', '/api/profile', null, debtor.token)).body.error, /pay what you owe first \(Rs 20\)/);
+  store.get('users', debtor.user.id).dues = 0;
+  await api('PUT', '/api/driver/application', { driverType: 'partner', personal: person('Owes Fees') }, debtor.token);
+  assert.equal((await api('POST', '/api/driver/application/documents', { kind: 'licence', data: JPG }, debtor.token)).status, 200);
+  const fileIds = Object.values(store.all('kyc').find((k) => k.userId === debtor.user.id).documents);
+  assert.equal((await api('DELETE', '/api/profile', null, debtor.token)).body.deleted, true);
+  assert.equal(store.all('kyc').some((k) => k.userId === debtor.user.id), false, 'application gone');
+  assert.ok(fileIds.length && fileIds.every((id) => !store.get('files', id)), 'documents gone');
 });
 
 test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
@@ -433,6 +458,18 @@ test('eSewa trip payment: after the ride the customer pays the exact fare; only 
   assert.equal((await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).status, 409, 'cannot pay twice');
 });
 
+test('crash reports from the apps reach the ops console; flooding is rate-limited', async () => {
+  const r = await api('POST', '/api/client-errors', { app: 'myride', version: '1.0.0', platform: 'android 13', fatal: true, screen: 'render', message: 'TypeError: x is undefined', stack: 'at Home' }, rider.token);
+  assert.equal(r.status, 204);
+  const list = (await api('GET', '/api/admin/client-errors', null, admin.token)).body;
+  assert.deepEqual([list[0].app, list[0].fatal, list[0].message], ['myride', true, 'TypeError: x is undefined']);
+  assert.ok(list[0].userId, 'linked to the signed-in user');
+  assert.equal((await api('GET', '/api/admin/client-errors', null, rider.token)).status, 403, 'ops only');
+  let last;
+  for (let i = 0; i < 25; i++) last = await api('POST', '/api/client-errors', { message: `flood ${i}` });
+  assert.equal(last.status, 429);
+});
+
 test('admin promo creation and economics endpoint (v1 vs v2 bridge, 24-month projection, fleet)', async () => {
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15, maxOff: 40 }, admin.token)).status, 200);
   assert.equal((await api('POST', '/api/admin/promos', { code: 'DASHAIN', type: 'percent', value: 0.15 }, admin.token)).status, 409);
@@ -490,11 +527,18 @@ test('navigation endpoint returns a polyline and turn-by-turn steps; needs a ses
 });
 
 test('nearby cars: anonymous, rounded positions of idle online drivers within 3 km', async () => {
+  // An idle online rider just north of Lakeside (set directly: going online may first ask for a routine selfie).
+  const d = svc.driverOf(store.all('users').find((u) => u.phone === '9856000002'));
+  Object.assign(d, { online: true, status: 'idle', currentTripId: null, offerTripId: null, suspended: null, loc: { lat: P('lakeside').lat + 0.001, lng: P('lakeside').lng } });
   const r = (await api('GET', `/api/nearby?lat=${P('lakeside').lat}&lng=${P('lakeside').lng}`)).body;
-  assert.ok(Array.isArray(r));
+  assert.ok(r.length >= 1, 'an online rider near Lakeside is listed');
+  const driverIds = store.all('drivers').map((d) => d.id);
   for (const c of r) {
-    assert.deepEqual(Object.keys(c).sort(), ['ev', 'lat', 'lng', 'type']);
+    assert.deepEqual(Object.keys(c).sort(), ['ev', 'heading', 'key', 'lat', 'lng', 'type']);
     assert.equal(Math.round(c.lat * 1000), c.lat * 1000);
+    assert.ok(!driverIds.some((id) => c.key.includes(id) || id.includes(c.key)), 'the key is not the driver id');
   }
+  const again = (await api('GET', `/api/nearby?lat=${P('lakeside').lat}&lng=${P('lakeside').lng}`)).body;
+  assert.deepEqual(again.map((c) => c.key).sort(), r.map((c) => c.key).sort(), 'stable between polls (cars glide)');
   assert.equal((await api('GET', '/api/nearby?lat=x')).status, 400);
 });

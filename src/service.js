@@ -20,6 +20,8 @@ class HttpError extends Error {
 }
 const fail = (status, msg, extra, expose) => { throw new HttpError(status, msg, extra, expose); };
 const pin4 = () => String(crypto.randomInt(1000, 10000));
+// Secret for the anonymous nearby-vehicle keys (a fresh one per server start is fine: keys just change).
+const NEARBY_SECRET = process.env.NEARBY_KEY_SECRET || crypto.randomBytes(32).toString('hex');
 const r2 = (n) => Math.round(n * 100) / 100;
 const kindOf = (svc) => (svc.kind === 'ride' ? 'ride' : svc.logistics ? 'logistics' : 'delivery');
 
@@ -175,6 +177,17 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   function deleteAccount(user) {
     if (driverOf(user)) fail(409, 'You are also a MyRide rider. Please contact MyRide support to close your rider account (payouts and records).');
     if (store.all('trips').some((t) => t.riderId === user.id && (ACTIVE.includes(t.status) || t.status === 'scheduled'))) fail(409, 'Finish or cancel your current or scheduled trip first');
+    // Money owed stays collectable: settle cancellation fees and unpaid eSewa/Khalti rides first.
+    const unpaid = store.all('trips').filter((t) => t.riderId === user.id && t.status === 'completed' && t.payment.method !== 'cash' && t.payment.status !== 'paid' && t.fare > 0);
+    const owed = r2((user.dues || 0) + unpaid.reduce((s, t) => s + t.fare, 0));
+    if (owed > 0) fail(409, `Please pay what you owe first (Rs ${owed})${unpaid.length ? ': open the unpaid trip in Your trips' : ''}`);
+    // A rider application that was never approved goes too: identity documents, bank details, face data and photos.
+    const kycApp = kycOf(user);
+    if (kycApp) {
+      for (const fileId of Object.values(kycApp.documents || {})) files?.remove?.(fileId);
+      delete store.db.kyc[kycApp.id];
+    }
+    for (const f of store.all('files')) if (f.ownerId === user.id) files?.remove?.(f.id); // e.g. delivery photos uploaded by them
     const mine = store.all('trips').filter((t) => t.riderId === user.id);
     const ids = new Set(mine.map((t) => t.id));
     for (const t of mine) {
@@ -204,6 +217,8 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   // ---------- stops on the way (rides, like Uber: up to 2 before the destination) ----------
   const MAX_STOPS = 2;
   const STOP_MIN = 2; // minutes allowed at each stop in the time estimate
+  const STOP_RADIUS_KM = 0.3; // the rider must be this close to mark "arrived at stop"
+  const STOP_WAIT_MAX_MIN = 15; // most waiting counted at one stop
   function cleanStops(svc, stops) {
     if (stops === undefined || stops === null || (Array.isArray(stops) && !stops.length)) return [];
     if (!Array.isArray(stops)) fail(400, 'Stops must be a list');
@@ -393,7 +408,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const employee = driver?.driverType === 'employee';
     return {
       id: trip.id, kind: trip.kind, logistics: trip.logistics, service: trip.service, status: trip.status,
-      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
+      pickup: trip.pickup, drop: trip.drop, stops: trip.stops || [], stopsDone: trip.stopsDone || 0, stopArrivedAt: trip.stopArrivedAt || null, km: trip.route.km, min: trip.route.min, geometry: trip.route.geometry,
       fare: trip.fare,
       earning: employee ? null : trip.quote.split.driver, // fleet employees are paid wages, not per trip
       employee,
@@ -413,8 +428,9 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return {
       ...rest,
       deliveryOtp: trip.kind === 'delivery' ? deliveryOtp : undefined, // sender shares it with the recipient
+      waitRule: { freeMin: SERVICES[trip.service].waitFreeMin, perMin: SERVICES[trip.service].waitPerMin }, // pickup and each stop
       // No phone number: calls go through POST /api/trips/:id/call (masked when a call bridge is configured).
-      driver: d ? { id: d.id, name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
+      driver: d ? { name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
     };
   }
 
@@ -450,7 +466,10 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     if (!CHAT_OPEN.includes(t.status) || !t.driverId) fail(409, 'You can call while the trip is on');
     const d = store.get('drivers', t.driverId);
     t.calls = [...(t.calls || []), { at: now(), from }].slice(-50);
-    if (!t.callCode) t.callCode = String(crypto.randomInt(100000, 1000000)); // the bridge looks the trip up by this
+    if (!t.callCode) { // the bridge looks the trip up by this: unique among trips that are on
+      const inUse = new Set(store.all('trips').filter((x) => CHAT_OPEN.includes(x.status) && x.callCode).map((x) => x.callCode));
+      do t.callCode = String(crypto.randomInt(100000, 1000000)); while (inUse.has(t.callCode));
+    }
     store.save();
     const bridge = process.env.CALL_BRIDGE_NUMBER;
     if (bridge) return { masked: true, dial: bridge, code: t.callCode };
@@ -888,11 +907,32 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return t;
   }
 
-  /** Driver: done at the current stop, on to the next one (or the destination). */
+  /** Driver: arrived at the current stop (starts the stop's waiting clock; the customer sees it). */
+  function stopArrived(user, id) {
+    const { t } = ownTrip(user, id);
+    if (t.status !== 'in_progress') fail(409, 'Start the trip first');
+    if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    const stop = t.stops[t.stopsDone || 0];
+    const { d } = ownTrip(user, id);
+    // The waiting clock only starts at the stop itself (no billing driving time as "waiting").
+    if (d.loc && haversineKm(d.loc, stop) > STOP_RADIUS_KM) fail(409, `You're not at stop ${(t.stopsDone || 0) + 1} yet`);
+    if (!t.stopArrivedAt) {
+      t.stopArrivedAt = now();
+      t.events.push({ at: now(), status: 'in_progress', note: `stop_${(t.stopsDone || 0) + 1}_arrived` });
+      store.save();
+      emitTrip(t);
+    }
+    return t;
+  }
+
+  /** Driver: done at the current stop, on to the next one (or the destination). Time waited there is recorded. */
   function nextStop(user, id) {
     const { t } = ownTrip(user, id);
     if (t.status !== 'in_progress') fail(409, 'Start the trip first');
     if ((t.stopsDone || 0) >= (t.stops || []).length) fail(409, 'No more stops: drive to the destination');
+    // Minutes waited at this stop, capped (a forgotten "Continue" must not bill the rest of the drive).
+    t.stopWaits = [...(t.stopWaits || []), t.stopArrivedAt ? Math.min(STOP_WAIT_MAX_MIN, (now() - t.stopArrivedAt) / 60000) : 0];
+    t.stopArrivedAt = null;
     t.stopsDone = (t.stopsDone || 0) + 1;
     t.events.push({ at: now(), status: 'in_progress', note: `stop_${t.stopsDone}_done` });
     store.save();
@@ -911,7 +951,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const rider = store.get('users', t.riderId);
     // Final fare includes waiting time; discounts are re-applied to the final amount (credits re-checked).
     const requested = (t.discountsRequested || []).map((x) => (x.kind === 'credit' ? { ...x, amount: rider.credits || 0 } : x));
-    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, waiveCod: t.riderMember });
+    const base = quote(t.service, t.route, { parcel: t.parcel, waitMin: t.waitMin, stopWaits: t.stopWaits, waiveCod: t.riderMember });
     const final = applyDiscounts(base, requested);
     t.quote = final;
     t.fare = final.total + (t.dues || 0);
@@ -961,7 +1001,9 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return store.all('drivers')
       .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
       .slice(0, 25)
-      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
+      // key: a per-day anonymous id per vehicle so the map can glide each car. Keyed with a server secret and the day,
+      // so nobody can link it to a driver (or follow one driver from day to day).
+      .map((d) => ({ key: crypto.createHmac('sha256', NEARBY_SECRET).update(`${new Date(t).toISOString().slice(0, 10)}:${d.id}`).digest('hex').slice(0, 12), lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
   }
 
   function stats() {
@@ -1018,7 +1060,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, messages, sendMessage, callInfo, bridgeLookup, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, callInfo, bridgeLookup, stopArrived, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }

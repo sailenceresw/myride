@@ -13,10 +13,14 @@
   }
 
   async function load() {
-    const [s, drivers, trips, apps, fleet, payouts, promos] = await Promise.all([
+    const [s, drivers, trips, apps, fleet, payouts, promos, appErrors] = await Promise.all([
       api('GET', '/api/admin/stats', null, token), api('GET', '/api/admin/drivers', null, token), api('GET', '/api/admin/trips', null, token),
       api('GET', '/api/admin/applications', null, token), api('GET', '/api/admin/fleet', null, token), api('GET', '/api/admin/payouts', null, token), api('GET', '/api/admin/promos', null, token),
+      api('GET', '/api/admin/client-errors', null, token),
     ]);
+    $('#appErrors').innerHTML = appErrors.length
+      ? `<table><tr><th>When</th><th>App</th><th>Screen</th><th>Error</th></tr>${appErrors.slice(0, 50).map((e) => `<tr><td>${new Date(e.at).toLocaleString()}</td><td>${esc(e.app)} ${esc(e.version)} ${esc(e.platform)}</td><td>${esc(e.screen)}</td><td>${e.fatal ? '<b class="neg">CRASH</b> ' : ''}<span title="${esc(e.stack)}">${esc(e.message)}</span></td></tr>`).join('')}</table>`
+      : '<span class="muted">No app errors reported.</span>';
     $('#tiles').innerHTML = [
       ['Trips completed', s.trips.completed], ['Active now', s.trips.active], ['Parcels', s.trips.deliveries], ['Logistics jobs', s.trips.logistics],
       ['GMV', rs(s.gmv)], ['Platform revenue (net)', rs(s.platformRevenue)], ['Fleet revenue', rs(s.fleetRevenue)], ['Paid to partners', rs(s.driverEarnings)],
@@ -194,6 +198,7 @@
       if (m.type === 'sos') card(`<b class="neg">SOS</b> trip ${esc(m.tripId)} · customer ${esc(m.rider)} · ${new Date(m.incident.at).toLocaleTimeString()} ${m.incident.loc ? `· <a target="_blank" href="https://www.openstreetmap.org/?mlat=${m.incident.loc.lat}&mlon=${m.incident.loc.lng}#map=17/${m.incident.loc.lat}/${m.incident.loc.lng}">location</a>` : ''}`);
       if (m.type === 'face_fail') card(`<b class="neg">Face verification failed twice</b> — ${esc(m.name)} suspended pending review`);
       if (m.type === 'kyc_submitted') toast('New driver application to review');
+      if (m.type === 'client_error' && m.fatal) toast(`App crash (${m.app}): ${m.message}`);
     });
   }
   $('#logout').onclick = () => { MR.store.del(MR.tokenKey('admin')); location.reload(); };

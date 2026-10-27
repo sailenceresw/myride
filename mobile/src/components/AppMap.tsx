@@ -137,7 +137,13 @@ body.dark .pin,body.dark .stem{background:#fff}body.dark .pin i{background:#111}
 const STYLES={light:'https://tiles.openfreemap.org/styles/positron',dark:'https://tiles.openfreemap.org/styles/dark'};
 const map=new maplibregl.Map({container:'m',style:STYLES.light,center:[${POKHARA.longitude},${POKHARA.latitude}],zoom:13.5,dragRotate:false,pitchWithRotate:false,attributionControl:{compact:true}});
 map.touchZoomRotate.disableRotation();
-let pad={top:0,right:0,bottom:0,left:0},dark=false,lines=[],pins=[];
+let pad={top:0,right:0,bottom:0,left:0},dark=false,lines=[];
+// Markers are kept by key and moved, not redrawn: vehicles glide to new positions (ease over ~1 s) and turn smoothly.
+const pins=new Map(); // key → { mk, el, sig, raf }
+const glide=(p,to)=>{cancelAnimationFrame(p.raf);const from=p.mk.getLngLat(),t0=performance.now(),dur=1000;
+  if(Math.abs(from.lng-to[0])>0.02||Math.abs(from.lat-to[1])>0.02){p.mk.setLngLat(to);return;} // a jump (new trip, GPS reset): no slide across town
+  const step=(t)=>{const f=Math.min(1,(t-t0)/dur),e=f<.5?2*f*f:1-Math.pow(-2*f+2,2)/2;p.mk.setLngLat([from.lng+(to[0]-from.lng)*e,from.lat+(to[1]-from.lat)*e]);if(f<1)p.raf=requestAnimationFrame(step);};
+  p.raf=requestAnimationFrame(step);};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // Top-down vehicles (pointing north, rotated to their heading).
 const BODY={car:['#1b1f20','#5f6a6b'],car_ev:['#1b1f20','#5f6a6b'],jeep:['#2a2f30','#6b7677'],van:['#e9ecec','#4d5657'],pickup:['#2a2f30','#6b7677'],cargo:['#e9ecec','#4d5657'],truck_light:['#e9ecec','#4d5657'],truck:['#e9ecec','#4d5657']};
@@ -166,9 +172,16 @@ window.mr={
   draw(s){pad=s.pad;
     if(!!s.dark!==dark){dark=!!s.dark;document.body.classList.toggle('dark',dark);map.setStyle(STYLES[dark?'dark':'light']);}
     lines=s.lines;applyLines();
-    pins.forEach(p=>p.remove());
-    pins=s.markers.map(m=>{const e=markerEl(m);e.style.zIndex=m.kind==='vehicle'?1:m.kind==='me'?2:3;
-      return new maplibregl.Marker({element:e,anchor:m.kind==='vehicle'||m.kind==='me'?'center':'bottom'}).setLngLat([m.at.lng,m.at.lat]).addTo(map);});},
+    const seen=new Set();
+    s.markers.forEach(m=>{seen.add(m.key);const to=[m.at.lng,m.at.lat];
+      const sig=JSON.stringify([m.kind,m.label,m.eta,m.badge,m.vehicle,m.color,dark]); // heading excluded: it rotates in place
+      let p=pins.get(m.key);
+      if(p&&p.sig!==sig){cancelAnimationFrame(p.raf);p.mk.remove();p=null;}
+      if(!p){const e=markerEl(m);e.style.zIndex=m.kind==='vehicle'?1:m.kind==='me'?2:3;
+        p={mk:new maplibregl.Marker({element:e,anchor:m.kind==='vehicle'||m.kind==='me'?'center':'bottom'}).setLngLat(to).addTo(map),el:e,sig,raf:0};pins.set(m.key,p);}
+      else glide(p,to);
+      if(m.kind==='vehicle'){const v=p.el.querySelector('.veh');if(v)v.style.transform='rotate('+(m.heading||0)+'deg)';}});
+    for(const [k,p] of pins)if(!seen.has(k)){cancelAnimationFrame(p.raf);p.mk.remove();pins.delete(k);}},
   fly(c,z,ms){map.easeTo({center:[c.lng,c.lat],zoom:z,duration:ms,padding:pad});},
   fit(pts,p){if(!pts.length)return;const b=new maplibregl.LngLatBounds();pts.forEach(x=>b.extend([x.lng,x.lat]));map.fitBounds(b,{padding:p,maxZoom:16.5,duration:600});}
 };send('ready');

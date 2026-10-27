@@ -167,6 +167,8 @@ Store builds use EAS profiles (`customer`, `drive`, and `*-preview` APKs): `npx 
 | `GOOGLE_MAPS_ANDROID_KEY`, `GOOGLE_MAPS_IOS_KEY` | Mobile store builds (restrict to the app package / bundle ID) |
 | `EXPO_PUBLIC_API_URL` | Mobile API base URL (e.g. `https://api.myride.com.np`) |
 | `PUBLIC_URL` | This server's public address, used in live-trip links sent by SMS when a customer shares a trip (default `http://localhost:3000`) |
+| `CALL_BRIDGE_NUMBER`, `CALL_BRIDGE_SECRET` | Masked calling: the provider number customers and riders dial (plus a trip code), and the shared secret its IVR sends to `POST /api/call-bridge/lookup` to learn whom to connect. Without them, calls go direct during the trip only |
+| `NEARBY_KEY_SECRET` | Secret for the anonymous per-day keys of nearby vehicles (random per server start if unset) |
 | `SUPPORT_PHONE` | MyRide customer support number shown as "Help and support" / "Get help" in the app (hidden when unset) |
 | `EAS_PROJECT_ID_CUSTOMER`, `EAS_PROJECT_ID_DRIVER` | EAS project IDs: enable push notifications in MyRide and MyRide Drive (`EAS_PROJECT_ID_RIDER` still works as the old name for the customer one) |
 | `EXPO_ACCESS_TOKEN` | Only if Expo "enhanced push security" is on |

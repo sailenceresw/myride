@@ -89,7 +89,8 @@ export default function CustomerHome() {
   const [city, setCity] = useState<{ centre: Point; maxRadiusKm: number } | null>(null);
   const [when, setWhen] = useState<number | null>(null); // scheduled pickup time; null = now
   const [whenOpen, setWhenOpen] = useState(false);
-  const [nearby, setNearby] = useState<{ lat: number; lng: number; type: string; heading?: number | null }[]>([]);
+  const [nearby, setNearby] = useState<{ key?: string; lat: number; lng: number; type: string; heading?: number | null }[]>([]);
+  const [approach, setApproach] = useState<Point[] | null>(null); // the rider's road route to the pickup
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [sheetH, setSheetH] = useState(300);
@@ -122,16 +123,17 @@ export default function CustomerHome() {
       .then(([p, c]) => { setPlaces([...p, ...c.logistics.destinations.map((d) => ({ ...d, category: 'intercity' }))]); setCity(c.city); setPlacesFailed(false); })
       .catch(() => setPlacesFailed(true));
   }, []);
-  const loadTrips = useCallback(() => {
+  // withUnpaid (app start only): if nothing is in progress, bring back a finished eSewa/Khalti ride still to pay
+  // (last 7 days), like Uber's outstanding balance. Not after "Done", or the customer could never get back to booking.
+  const loadTrips = useCallback((withUnpaid = false) => {
     api<Trip[]>('GET', '/api/trips').then((l) => {
-      // A trip in progress, or else a finished eSewa/Khalti ride still to pay (last 7 days), like Uber's outstanding balance.
-      const unpaid = l.find((x) => x.status === 'completed' && x.payment.method !== 'cash' && x.payment.status !== 'paid' && x.fare > 0 && Date.now() - x.createdAt < 7 * 86400000);
+      const unpaid = withUnpaid ? l.find((x) => x.status === 'completed' && ['esewa', 'khalti'].includes(x.payment.method) && ['due', 'pending'].includes(x.payment.status) && x.fare > 0 && Date.now() - x.createdAt < 7 * 86400000) : undefined;
       setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? unpaid ?? null);
       const seen = new Set<string>();
       setRecent(l.filter((x) => x.status === 'completed' && x.drop.label && !seen.has(x.drop.label) && seen.add(x.drop.label)).slice(0, 3).map((x) => x.drop));
     }).catch(() => {});
   }, []);
-  useEffect(() => { loadPlaces(); loadTrips(); }, [loadPlaces, loadTrips]);
+  useEffect(() => { loadPlaces(); loadTrips(true); }, [loadPlaces, loadTrips]);
 
   // Links from other screens: "Set Home / Work" (Account) opens that search; "Book again" (Your trips) below.
   const params = useLocalSearchParams<{ rebook?: string; set?: string }>();
@@ -186,6 +188,14 @@ export default function CustomerHome() {
   // While the rider comes to you, frame the rider and the pickup (re-framed every ~100 m), like Uber.
   const coming = !!trip && ['accepted', 'arrived'].includes(trip.status) && !!trip.driver?.loc;
   const driverCell = coming ? `${trip!.driver!.loc!.lat.toFixed(3)},${trip!.driver!.loc!.lng.toFixed(3)}` : null;
+  // The rider's road route to you, like Uber's approach line: fetched again each time they move ~100 m.
+  useEffect(() => {
+    if (!coming || !trip?.driver?.loc) return;
+    const from = trip.driver.loc, to = trip.pickup;
+    api<{ geometry: [number, number][] }>('GET', `/api/navigate?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}`)
+      .then((r) => setApproach(r.geometry.map(([lat, lng]) => ({ lat, lng }))))
+      .catch(() => setApproach([from, to]));
+  }, [driverCell]); // eslint-disable-line react-hooks/exhaustive-deps -- driverCell stands for the rider's position
   // Otherwise keep the whole route visible above the sheet, whatever its height.
   useEffect(() => {
     // Room for the pin labels (they stand ~70 px above their pins and can be ~200 px wide) and the top buttons.
@@ -263,11 +273,11 @@ export default function CustomerHome() {
   const vias = trip ? trip.stops ?? [] : stops;
   const markers: MapMarker[] = [
     // Nearby vehicles only before a destination is chosen: on the fare screen they would hide the route.
-    ...(trip || drop ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
+    ...(trip || drop ? [] : nearby.map((c, i) => ({ key: `n${c.key ?? i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
     ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : short(pk.label === 'Current location' ? 'Pickup' : pk.label) }] : []),
     ...vias.map((s, i) => ({ key: `stop${i}`, at: s, kind: 'stop' as const, badge: String(i + 1) })), // numbered pin, no label: keeps the route visible
     ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: short(dp.label), eta: quote && !trip ? `${Math.round(quote.route.min)} min` : undefined }] : []),
-    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, vehicle: trip.driver.vehicle.type, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
+    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, vehicle: trip.driver.vehicle.type, heading: trip.driver.heading, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
   ];
   const input = [styles.small, { borderColor: t.line, color: t.ink, backgroundColor: t.bg }];
 
@@ -306,7 +316,8 @@ export default function CustomerHome() {
   const first = profile?.name?.split(' ')[0];
   return (
     <View style={{ flex: 1 }}>
-      <AppMap ref={map} user={fix} padding={{ bottom: sheetH }} markers={markers} lines={routeCoords ? [{ coords: routeCoords, color: t.ink, width: 5 }] : []} />
+      <AppMap ref={map} user={fix} padding={{ bottom: sheetH }} markers={markers}
+        lines={coming && approach ? [{ coords: approach, color: t.ink, width: 5 }] : routeCoords ? [{ coords: routeCoords, color: t.ink, width: 5 }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
         <View>
@@ -426,7 +437,7 @@ export default function CustomerHome() {
                   <Txt kind="small" style={{ marginVertical: 6 }} numberOfLines={2}>
                     {quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min
                     {stops.length
-                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, keep each about 2 min`
+                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, waiting over 3 min at a stop is charged`
                       : quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}
                   </Txt>
                 )}
