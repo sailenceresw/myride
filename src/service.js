@@ -1,6 +1,6 @@
 // MyRide business logic. Pure of HTTP so the API, the simulator and the tests share it.
 const crypto = require('crypto');
-const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC } = require('./config');
+const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC, CITY } = require('./config');
 const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, bearing, nearestPlace, places } = require('./geo');
 const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
 const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
@@ -191,7 +191,10 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       let ds;
       try { ds = discountStack(user, id, promoCode, useCredits); } catch (e) { promoError = e.message; ds = discountStack(user, id, null, useCredits); }
       try {
-        quotes.push({ ...quote(id, r, { parcel, waiveCod: member, discounts: ds }), available: countAvailable(id, pickup, member) });
+        const near = findCandidates(store.all('drivers'), { serviceId: id, pickup, priority: member }, now());
+        // Minutes for the nearest free driver to reach the pickup (city traffic speed), like Uber's "3 min away".
+        const pickupMin = near.length ? Math.max(1, Math.round((near[0].pickupKm / CITY.fallbackSpeedKmh) * 60)) : null;
+        quotes.push({ ...quote(id, r, { parcel, waiveCod: member, discounts: ds }), available: near.length, pickupMin, seats: svc.seats ?? null });
       } catch (e) {
         quotes.push({ service: id, label: svc.label, unavailable: e.message });
       }
@@ -204,10 +207,6 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       pickupPlace: nearestPlace(pickup)?.name || null, dropPlace: nearestPlace(drop)?.name || null,
       pickupWard: wardOf(pickup)?.label || null, dropWard: wardOf(drop)?.label || null,
     };
-  }
-
-  function countAvailable(serviceId, pickup, priority) {
-    return findCandidates(store.all('drivers'), { serviceId, pickup, priority }, now()).length;
   }
 
   async function fixedRoutes() {

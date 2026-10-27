@@ -6,6 +6,7 @@ import { IS_DRIVE } from '@/lib/config';
 export default function CustomerLayout() {
   const { ready, token } = useAuth();
   if (IS_DRIVE) return <Redirect href="/" />;
-  if (ready && !token) return <Redirect href="/login" />;
+  if (!ready) return null; // opened from a link or notification: wait for the saved sign-in before screens call the API
+  if (!token) return <Redirect href="/login" />;
   return <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }} />;
 }

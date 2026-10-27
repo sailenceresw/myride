@@ -82,6 +82,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     logistics: { ...LOGISTICS },
     membership: MEMBERSHIP,
     safety: SAFETY,
+    support: { phone: process.env.SUPPORT_PHONE || null }, // MyRide customer support line (Help in the apps)
     regulation: { maxRadiusKm: CITY.maxRadiusKm, maxDriverHoursPerDay: GANDAKI.maxDriverHoursPerDay, fareSchedule: { bike: GANDAKI.bike, car: GANDAKI.car }, discounts: GANDAKI.discount },
     kyc: { banks: KYC.banks, documents: KYC.documents },
     payroll: { defaultWage: PAYROLL.defaultMonthlyWage, minimumWage: PAYROLL.minimumWageMonthly, overtimeMultiplier: PAYROLL.overtimeMultiplier },

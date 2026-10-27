@@ -155,6 +155,8 @@ export function BackHeader({ title, light, onBack = goBack }: { title: string; l
   const c = light ? '#fff' : t.ink;
   return (
     <Row style={{ paddingVertical: 8, gap: 12 }}>
+      {/* Each screen sets its own status bar: a Hero screen underneath must not leave white icons on a light page. */}
+      <StatusBar style={light ? 'light' : 'auto'} />
       <Pressable onPress={onBack} accessibilityLabel="Back" hitSlop={10} style={[styles.center, { width: 40, height: 40, borderRadius: 20, backgroundColor: light ? '#ffffff22' : t.chip }]}>
         <Icon name="chevron-back" size={22} color={c} />
       </Pressable>

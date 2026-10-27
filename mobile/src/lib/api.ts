@@ -41,6 +41,7 @@ export const rs = (n: number, decimals = 0) => `Rs ${(decimals ? n : Math.round(
 export type Point = { lat: number; lng: number; label?: string };
 export type Quote = {
   service: string; label: string; total: number; gross: number; km: number; min: number; available?: number;
+  pickupMin?: number | null; seats?: number | null; // nearest free driver's minutes to the pickup; passenger seats
   unavailable?: string; legalCap: number | null; intercity?: boolean;
   discounts: { kind: string; label: string; amount: number }[];
   competitors: { name: string; estimate: number }[];
