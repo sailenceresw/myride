@@ -213,6 +213,22 @@ test('stops: up to 2 on the way, priced on the whole route; the rider marks each
   assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
 });
 
+test('account deletion: personal data removed, signed out everywhere, trips kept without the person', async () => {
+  const me = await login('9846000077', 'Sita Delete');
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash', note: 'by the blue gate' }, me.token)).body;
+  assert.equal((await api('DELETE', '/api/profile', null, me.token)).status, 409, 'not during a trip');
+  await api('POST', `/api/trips/${t.id}/cancel`, {}, me.token);
+  assert.equal((await api('DELETE', '/api/profile', null, bikeDrv.token)).status, 403, 'rider (driver) accounts use the Drive portal / support');
+  const del = await api("DELETE", "/api/profile", null, me.token);
+  assert.equal(del.body.deleted, true, JSON.stringify(del.body));
+  assert.equal((await api('GET', '/api/profile', null, me.token)).status, 401, 'signed out');
+  const kept = store.get('trips', t.id);
+  assert.deepEqual([kept.riderName, kept.riderPhone, kept.note], ['Deleted user', null, undefined]);
+  assert.equal(store.all('users').some((u) => u.phone === '9846000077'), false, 'number freed');
+  const again = await login('9846000077', 'Sita New');
+  assert.notEqual(again.user.id, me.user.id, 'signing up again makes a fresh account');
+});
+
 test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
   const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');
@@ -226,10 +242,35 @@ test('chat: customer and rider can message only while the trip is on; others can
   assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, outsider.token)).status, 403);
   const thread = (await api('GET', `/api/trips/${t.id}/messages`, null, bikeDrv.token)).body;
   assert.deepEqual(thread.map((m) => m.from), ['rider', 'driver']);
+
+  // Phone numbers are private: never in trip data; calls ask the server, only during the trip.
+  const asRider = (await api('GET', `/api/trips/${t.id}`, null, rider.token)).body;
+  const asDriver = (await api('GET', `/api/trips/${t.id}`, null, bikeDrv.token)).body;
+  assert.equal(asRider.driver.phone, undefined, "the customer's view has no rider number");
+  // The rider's verified photo, for the customer of this trip only.
+  assert.equal(asRider.driver.photo, true);
+  const photo = await fetch(`${base}/api/trips/${t.id}/driver-photo`, { headers: { Authorization: `Bearer ${rider.token}` } });
+  assert.equal(photo.status, 200);
+  assert.match(photo.headers.get('content-type'), /^image\//);
+  assert.equal((await fetch(`${base}/api/trips/${t.id}/driver-photo`, { headers: { Authorization: `Bearer ${outsider.token}` } })).status, 403);
+  assert.equal(JSON.stringify(asDriver).includes('9846000001'), false, "the rider's view has no customer number");
+  const dial = (await api('POST', `/api/trips/${t.id}/call`, {}, rider.token)).body;
+  assert.deepEqual([dial.masked, dial.dial], [false, '9856000002'], 'without a bridge: the number for this call only');
+  process.env.CALL_BRIDGE_NUMBER = '014000000'; process.env.CALL_BRIDGE_SECRET = 's3cret';
+  const masked = (await api('POST', `/api/trips/${t.id}/call`, {}, bikeDrv.token)).body;
+  assert.equal(masked.masked, true);
+  assert.equal(masked.dial, '014000000', 'with a bridge: MyRide number + trip code, no personal number');
+  const bridge = (body, secret = 's3cret') => fetch(`${base}/api/call-bridge/lookup`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-bridge-secret': secret }, body: JSON.stringify(body) });
+  assert.equal((await bridge({ code: masked.code, caller: '9856000002' }, 'wrong')).status, 401);
+  assert.equal((await (await bridge({ code: masked.code, caller: '+977 9856000002' })).json()).connect, '9846000001');
+  assert.equal((await bridge({ code: masked.code, caller: '9800000099' })).status, 404, 'strangers with the code are not connected');
+  delete process.env.CALL_BRIDGE_NUMBER; delete process.env.CALL_BRIDGE_SECRET;
+  assert.equal((await api('POST', `/api/trips/${t.id}/call`, {}, outsider.token)).status, 403);
   await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
   await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
   assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'thanks!' }, rider.token)).status, 409, 'chat closes with the trip');
+  assert.equal((await api('POST', `/api/trips/${t.id}/call`, {}, rider.token)).status, 409, 'and so do calls');
   assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, rider.token)).body.length, 2, 'history stays readable');
 });
 
@@ -370,6 +411,26 @@ test('eSewa: membership order callback activates Plus; tampered callback rejecte
   cb.signature = esewaSign(cb, cb.signed_field_names);
   assert.match((await api('GET', `/api/pay/esewa/success?data=${encodeURIComponent(Buffer.from(JSON.stringify(cb)).toString('base64'))}`)).headers.get('location'), /membership_active/);
   assert.equal((await api('GET', '/api/profile', null, u.token)).body.membership.active, true);
+});
+
+test('eSewa trip payment: after the ride the customer pays the exact fare; only a verified callback marks it paid', async () => {
+  const u = await login('9846000041', 'Wallet Payer');
+  store.get('users', u.user.id).firstRideFreeUsed = true; // a paid ride, not the free first one
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('prithvi-chowk'), payment: 'esewa' }, u.token)).body;
+  assert.ok(t.fare > 0, 'a fare to pay');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  const done = (await api('GET', `/api/trips/${t.id}`, null, u.token)).body;
+  const pay = (await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).body;
+  assert.equal(pay.provider, 'esewa');
+  assert.equal(+pay.fields.total_amount, done.fare, 'charges exactly the fare');
+  const cb = { transaction_code: '000TRIP', status: 'COMPLETE', total_amount: pay.fields.total_amount, transaction_uuid: pay.fields.transaction_uuid, product_code: 'EPAYTEST', signed_field_names: 'transaction_code,status,total_amount,transaction_uuid,product_code,signed_field_names' };
+  cb.signature = esewaSign(cb, cb.signed_field_names);
+  assert.match((await api('GET', `/api/pay/esewa/success?data=${encodeURIComponent(Buffer.from(JSON.stringify(cb)).toString('base64'))}`)).headers.get('location'), /payment=paid/);
+  assert.equal((await api('GET', `/api/trips/${t.id}`, null, u.token)).body.payment.status, 'paid');
+  assert.equal((await api('POST', `/api/trips/${t.id}/pay`, {}, u.token)).status, 409, 'cannot pay twice');
 });
 
 test('admin promo creation and economics endpoint (v1 vs v2 bridge, 24-month projection, fleet)', async () => {

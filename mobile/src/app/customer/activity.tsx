@@ -7,7 +7,7 @@ import { api, rs, type Trip } from '@/lib/api';
 import { call } from '@/lib/config';
 import { useTheme, vehicleEmoji, type Theme } from '@/lib/theme';
 
-type Past = Trip & { createdAt: number };
+type Past = Trip;
 const STATUS: Record<string, [string, IconName, keyof Theme]> = {
   completed: ['Completed', 'checkmark-circle', 'ok'], cancelled: ['Cancelled', 'close-circle', 'danger'], no_driver: ['No rider found', 'alert-circle', 'muted'],
   searching: ['Finding a rider', 'search', 'accent'], accepted: ['Rider on the way', 'navigate', 'brand'], arrived: ['Rider arrived', 'flag', 'brand'],

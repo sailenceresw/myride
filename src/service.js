@@ -167,6 +167,31 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
   function cancelMembership(user) { rewards.cancelAutoRenew(user); store.save(); return profile(user); }
 
+  /**
+   * Delete a customer account (Google Play / App Store requirement): personal data removed, signed out everywhere.
+   * Trip records stay for accounting and safety, without the person's name, number, notes, chats or contacts.
+   * Riders (drivers) close their account through support: payouts, tax and KYC records must be settled first.
+   */
+  function deleteAccount(user) {
+    if (driverOf(user)) fail(409, 'You are also a MyRide rider. Please contact MyRide support to close your rider account (payouts and records).');
+    if (store.all('trips').some((t) => t.riderId === user.id && (ACTIVE.includes(t.status) || t.status === 'scheduled'))) fail(409, 'Finish or cancel your current or scheduled trip first');
+    const mine = store.all('trips').filter((t) => t.riderId === user.id);
+    const ids = new Set(mine.map((t) => t.id));
+    for (const t of mine) {
+      Object.assign(t, { riderName: 'Deleted user', riderPhone: null, note: undefined, sharedWith: undefined, business: null });
+      if (t.recipient) t.recipient = { name: 'Recipient' };
+    }
+    for (const m of store.all('messages')) if (ids.has(m.tripId)) delete store.db.messages[m.id];
+    for (const [token, s] of Object.entries(store.db.sessions)) if (s.userId === user.id) delete store.db.sessions[token];
+    if (user.membership) rewards.cancelAutoRenew(user); // stop Plus renewing
+    Object.assign(user, {
+      name: 'Deleted user', phone: `deleted:${user.id}`, email: '', business: null, closeContacts: [], pushTokens: [],
+      deletedAt: now(), roles: user.roles.filter((r) => r !== 'admin'),
+    });
+    store.save();
+    return { deleted: true };
+  }
+
   // ---------- quotes ----------
   function checkPoints(svc, pickup, drop) {
     if (!isValidPoint(pickup) || !isValidPoint(drop)) fail(400, 'Pickup and drop need lat/lng');
@@ -376,8 +401,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
       deadKmBonus: employee ? 0 : deadKmPay(trip.service, pickupKm),
       payment: trip.payment.method,
       parcel: trip.parcel, recipient: trip.status === 'in_progress' ? trip.recipient : trip.recipient && { name: trip.recipient.name },
-      riderName: trip.riderName,
-      riderPhone: ['accepted', 'arrived', 'in_progress'].includes(trip.status) ? trip.riderPhone : undefined,
+      riderName: trip.riderName, // no phone number: calls go through POST /api/trips/:id/call
       note: trip.note,
       offerExpiresAt: trip.offerExpiresAt,
     };
@@ -389,7 +413,8 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return {
       ...rest,
       deliveryOtp: trip.kind === 'delivery' ? deliveryOtp : undefined, // sender shares it with the recipient
-      driver: d ? { id: d.id, name: d.name, phone: d.phone, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, fleet: d.driverType === 'employee' } : null,
+      // No phone number: calls go through POST /api/trips/:id/call (masked when a call bridge is configured).
+      driver: d ? { id: d.id, name: d.name, gender: d.gender, rating: d.rating, vehicle: d.vehicle, loc: d.loc, heading: d.heading ?? null, fleet: d.driverType === 'employee', photo: !!d.faceRef } : null,
     };
   }
 
@@ -414,6 +439,31 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     const d = trip.driverId && store.get('drivers', trip.driverId);
     if (d) bus.emit(d.userId, { type: 'trip', role: 'driver', trip: driverView(trip, d) });
     bus.emit(`share:${trip.shareToken}`, { type: 'trip', trip: publicView(trip) });
+  }
+
+  // ---------- calls between customer and rider (numbers stay private) ----------
+  // With a call bridge (CALL_BRIDGE_NUMBER: a provider number whose IVR connects calls by trip code), neither side
+  // ever sees the other's number. Without one, the number is handed out only for this call, during the trip.
+  function callInfo(user, id) {
+    const t = getTripFor(user, id);
+    const from = chatRole(user, t);
+    if (!CHAT_OPEN.includes(t.status) || !t.driverId) fail(409, 'You can call while the trip is on');
+    const d = store.get('drivers', t.driverId);
+    t.calls = [...(t.calls || []), { at: now(), from }].slice(-50);
+    if (!t.callCode) t.callCode = String(crypto.randomInt(100000, 1000000)); // the bridge looks the trip up by this
+    store.save();
+    const bridge = process.env.CALL_BRIDGE_NUMBER;
+    if (bridge) return { masked: true, dial: bridge, code: t.callCode };
+    return { masked: false, dial: from === 'rider' ? d.phone : t.riderPhone };
+  }
+  /** For the call bridge provider: who to connect for a trip code and caller (only while the trip is on). */
+  function bridgeLookup(code, callerPhone) {
+    const t = store.all('trips').find((x) => x.callCode === String(code) && CHAT_OPEN.includes(x.status));
+    if (!t) return null;
+    const d = store.get('drivers', t.driverId);
+    if (callerPhone === t.riderPhone) return { connect: d.phone, tripId: t.id };
+    if (callerPhone === d.phone) return { connect: t.riderPhone, tripId: t.id };
+    return null;
   }
 
   // ---------- chat between customer and rider during a trip ----------
@@ -963,12 +1013,12 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   }
 
   return {
-    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, applyReferral,
+    requestOtp, verifyOtp, smsLog, nearbyDrivers, session, userFromToken, profile, updateProfile, deleteAccount, applyReferral,
     createMembershipOrder, startTrial, markOrderPaid, cancelMembership,
     quoteAll, fixedRoutes, createTrip, tick, offer, cancelTrip, rateTrip, sos,
     getApplication, saveApplication, uploadDocument, submitApplication, reviewApplication, addFleetVehicle, seedDriver,
     setOnline, submitSelfie, setHomeFilter, updateLocation, offersFor, acceptTrip, arrived, startTrip, completeTrip, driverDashboard,
-    getTripFor, messages, sendMessage, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
+    getTripFor, messages, sendMessage, callInfo, bridgeLookup, nextStop, shareTrip, forgetCloseContact, riderView, driverView, publicView, driverOf, kycOf, kycView, stats, suspendDriver, recordCashDeposit, runPayout, post,
     seedPromos: () => rewards.seedPromos(store), createPromo: (b) => rewards.createPromo(store, b), HttpError,
   };
 }

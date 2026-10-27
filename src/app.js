@@ -175,6 +175,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   // ---------- rider: profile, membership, referral ----------
   app.get('/api/profile', rider, (req, res) => res.json(svc.profile(req.user)));
   app.patch('/api/profile', rider, wrap((req) => svc.updateProfile(req.user, req.body)));
+  app.delete('/api/profile', rider, wrap((req) => svc.deleteAccount(req.user))); // store rule: delete your account in the app
   app.post('/api/profile/referral', rider, wrap((req) => svc.applyReferral(req.user, req.body.code)));
   app.post('/api/membership/trial', rider, wrap((req) => svc.startTrial(req.user, req.body.plan)));
   app.post('/api/membership/cancel', rider, wrap((req) => svc.cancelMembership(req.user)));
@@ -206,6 +207,15 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   // Chat between the customer and the rider while a trip is on (accepted → in progress).
   app.get('/api/trips/:id/messages', anyAuth, wrap((req) => svc.messages(req.user, req.params.id)));
   app.post('/api/trips/:id/messages', anyAuth, wrap((req) => svc.sendMessage(req.user, req.params.id, req.body.text)));
+  // Calls without sharing phone numbers: the app asks who to dial (a masked bridge number + trip code when configured).
+  app.post('/api/trips/:id/call', anyAuth, wrap((req) => svc.callInfo(req.user, req.params.id)));
+  // For the call-bridge provider's IVR: which number to connect a caller to, by trip code (shared-secret header).
+  app.post('/api/call-bridge/lookup', (req, res) => {
+    const secret = process.env.CALL_BRIDGE_SECRET;
+    if (!secret || req.get('x-bridge-secret') !== secret) return res.status(401).json({ error: 'Unauthorised' });
+    const hit = svc.bridgeLookup(req.body.code, String(req.body.caller || '').replace(/\D/g, '').slice(-10));
+    return hit ? res.json(hit) : res.status(404).json({ error: 'No active trip for this code and caller' });
+  });
   // The customer sends the live trip to people they choose (SMS now, again on arrival or SOS).
   app.post('/api/trips/:id/share', rider, wrap((req) => svc.shareTrip(req.user, req.params.id, req.body.contacts)));
   app.delete('/api/profile/close-contacts/:phone', rider, wrap((req) => svc.forgetCloseContact(req.user, req.params.phone)));
@@ -255,6 +265,20 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   }));
 
   // ---------- files (owner or admin only) ----------
+  // The rider's verified photo (KYC selfie), so the customer can check who is picking them up. Only the customer of
+  // this trip, from acceptance until 2 hours after it ends.
+  app.get('/api/trips/:id/driver-photo', rider, wrap((req, res) => {
+    const t = svc.getTripFor(req.user, req.params.id);
+    if (t.riderId !== req.user.id) throw new HttpError(403, 'Not your trip');
+    const ended = ['completed', 'cancelled'].includes(t.status) ? t.events.at(-1).at : null;
+    if (!['accepted', 'arrived', 'in_progress', 'completed'].includes(t.status) || (ended && (now ? now() : Date.now()) - ended > 2 * 3600000)) throw new HttpError(409, 'Photo available during the trip only');
+    const d = t.driverId && store.get('drivers', t.driverId);
+    const f = d?.faceRef && files.read(d.faceRef);
+    if (!f) throw new HttpError(404, 'No photo');
+    res.setHeader('Content-Type', f.rec.mime);
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    res.end(f.buf);
+  }));
   app.get('/api/files/:id', anyAuth, (req, res) => {
     const f = files.read(req.params.id);
     if (!f) return res.status(404).json({ error: 'Not found' });

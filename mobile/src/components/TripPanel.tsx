@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
-import { rs, type Point, type Trip } from '@/lib/api';
-import { call } from '@/lib/config';
+import { apiUrlFor, getApiToken, rs, type Point, type Trip } from '@/lib/api';
+import { callOnTrip } from '@/lib/tripCall';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useNow } from '@/lib/useNow';
 
@@ -12,6 +12,7 @@ const STATUS: Record<string, string> = {
   completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No riders available right now', scheduled: 'Scheduled',
 };
 const STEP_OF: Record<string, number> = { searching: 0, accepted: 1, arrived: 2, in_progress: 3 };
+const WALLET: Record<string, string> = { esewa: 'eSewa', khalti: 'Khalti', fonepay: 'Fonepay' };
 const PRAISE = ['Great driving', 'On time', 'Friendly', 'Clean vehicle', 'Knew the way', 'Safe helmet'];
 const PROBLEMS = ['Late pickup', 'Unsafe driving', 'Rude', 'Took a longer route', 'Dirty vehicle', 'Asked for more money'];
 
@@ -24,8 +25,8 @@ const roadMin = (a: Point, b: Point) => {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onRate, onSos, onDone }: {
-  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
+export function TripPanel({ trip, err, unread, onMessage, onShare, onPay, onCancel, onRate, onSos, onDone }: {
+  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onPay: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
 }) {
   const t = useTheme();
   const now = useNow();
@@ -68,7 +69,10 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
       {d && (
         <Card raised style={{ marginTop: 8 }}>
           <Row style={{ gap: 12 }}>
-            <Avatar name={d.name} size={52} />
+            {d.photo
+              // The rider's verified photo, so you can check who is picking you up (only you can load it, during the trip).
+              ? <Image source={{ uri: apiUrlFor(`/api/trips/${trip.id}/driver-photo`), headers: { Authorization: `Bearer ${getApiToken() ?? ''}` } }} style={styles.photo} accessibilityLabel={`Photo of ${d.name}`} />
+              : <Avatar name={d.name} size={52} />}
             <View style={{ flex: 1, gap: 3 }}>
               <Row style={{ gap: 6 }}><Txt style={{ fontWeight: '800' }}>{d.name}</Txt><Icon name="star" size={13} color={t.accent} /><Txt kind="small">{d.rating}</Txt></Row>
               <Txt kind="small">{d.vehicle.model}{d.fleet ? ' · MyRide fleet' : ''}</Txt>
@@ -85,7 +89,7 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
       {live && d && (
         <Row style={{ marginTop: 10 }}>
           <Action icon="chatbubble-ellipses" label="Message" onPress={onMessage} badge={unread} />
-          <Action icon="call" label="Call" onPress={() => call(d.phone)} />
+          <Action icon="call" label="Call" onPress={() => callOnTrip(trip.id)} />
           <Action icon="share-social" label="Share trip" onPress={onShare} />
           <Action icon="warning" label="SOS" onPress={onSos} danger />
         </Row>
@@ -110,6 +114,10 @@ export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onR
             <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginVertical: 8 }} />
             <Row style={{ justifyContent: 'space-between' }}><Txt style={{ fontWeight: '800' }}>Total · {trip.payment.method}</Txt><Txt kind="price" style={{ color: trip.fare === 0 ? t.ok : t.ink }}>{trip.fare === 0 ? 'FREE' : rs(trip.fare)}</Txt></Row>
           </Card>
+          {/* eSewa / Khalti trips are paid in the wallet's own page after the ride. */}
+          {trip.payment.method !== 'cash' && trip.fare > 0 && (trip.payment.status === 'paid'
+            ? <Row style={{ marginTop: 8, justifyContent: 'center' }}><Icon name="checkmark-circle" size={18} color={t.ok} /><Txt style={{ color: t.ok, fontWeight: '700' }}>Paid with {WALLET[trip.payment.method] ?? trip.payment.method}</Txt></Row>
+            : <Button title={`Pay ${rs(trip.fare)} with ${WALLET[trip.payment.method] ?? trip.payment.method}`} icon="wallet" kind="dark" onPress={onPay} style={{ marginTop: 10 }} />)}
           <Rating trip={trip} onRate={onRate} />
         </>
       )}
@@ -180,6 +188,7 @@ const styles = StyleSheet.create({
   action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
   pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  photo: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#ddd' },
   badge: { position: 'absolute', top: 6, right: 14, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   comment: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
