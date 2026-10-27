@@ -203,6 +203,12 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
     const t = svc.getTripFor(req.user, req.params.id);
     return req.portal === 'driver' ? svc.driverView(t, svc.driverOf(req.user)) : svc.riderView(t);
   }));
+  // Chat between the customer and the rider while a trip is on (accepted → in progress).
+  app.get('/api/trips/:id/messages', anyAuth, wrap((req) => svc.messages(req.user, req.params.id)));
+  app.post('/api/trips/:id/messages', anyAuth, wrap((req) => svc.sendMessage(req.user, req.params.id, req.body.text)));
+  // The customer sends the live trip to people they choose (SMS now, again on arrival or SOS).
+  app.post('/api/trips/:id/share', rider, wrap((req) => svc.shareTrip(req.user, req.params.id, req.body.contacts)));
+  app.delete('/api/profile/close-contacts/:phone', rider, wrap((req) => svc.forgetCloseContact(req.user, req.params.phone)));
   app.post('/api/trips/:id/cancel', anyAuth, wrap((req) => svc.riderView(svc.cancelTrip(req.user, req.params.id, req.body.reason))));
   app.post('/api/trips/:id/rate', anyAuth, wrap((req) => { svc.rateTrip(req.user, req.params.id, req.body.stars, req.body.comment); return { ok: true }; }));
   app.post('/api/trips/:id/sos', anyAuth, wrap((req) => ({ incident: svc.sos(req.user, req.params.id, req.body.loc), call: SAFETY })));
@@ -279,6 +285,7 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/driver/offers', driver, (req, res) => res.json(svc.offersFor(req.user)));
   app.post('/api/trips/:id/accept', driver, wrap((req) => svc.driverView(svc.acceptTrip(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/arrived', driver, wrap((req) => svc.driverView(svc.arrived(req.user, req.params.id), svc.driverOf(req.user))));
+  app.post('/api/trips/:id/next-stop', driver, wrap((req) => svc.driverView(svc.nextStop(req.user, req.params.id), svc.driverOf(req.user))));
   app.post('/api/trips/:id/start', driver, wrap((req) => svc.driverView(svc.startTrip(req.user, req.params.id, req.body.pin), svc.driverOf(req.user))));
   app.post('/api/trips/:id/complete', driver, wrap(async (req) => svc.driverView(await svc.completeTrip(req.user, req.params.id, req.body), svc.driverOf(req.user))));
 

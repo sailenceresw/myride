@@ -24,6 +24,7 @@ export type Profile = {
   membership: { active: boolean; label: string; expiresAt: number | null };
   driverApplication: { status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'resubmit' } | null; // rider application
   isDriver: boolean; // approved MyRide rider
+  closeContacts?: { name: string; phone: string }[]; // people this customer shared trips with before
 };
 
 type AuthState = {

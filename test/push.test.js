@@ -1,4 +1,10 @@
 const test = require('node:test');
+const { notificationFor: forChat } = require('../src/push');
+
+test('a chat message to someone not in the app becomes a push with the sender and text', () => {
+  const n = forChat({ type: 'message', role: 'rider', tripId: 't1', fromName: 'Ram Gurung', message: { id: 'm1', from: 'driver', text: 'I am at the gate', at: 1 } });
+  require('node:assert/strict').deepEqual(n, { portal: 'rider', title: 'Message from Ram', body: 'I am at the gate', url: '/customer' });
+});
 const assert = require('node:assert/strict');
 const { Store } = require('../src/store');
 const { createApp } = require('../src/app');

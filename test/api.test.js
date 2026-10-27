@@ -159,6 +159,80 @@ test('first ride is free (up to Rs 100) while the driver is paid in full; PIN re
   assert.equal((await api('GET', '/api/profile', null, rider.token)).body.firstRideFree, false);
 });
 
+test('share trip: the customer picks close ones, who get the live link by SMS, then "arrived safely"', async () => {
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
+  const share = (contacts, token = rider.token) => api('POST', `/api/trips/${t.id}/share`, { contacts }, token);
+  assert.equal((await share([{ name: 'Wrong', phone: '12345' }])).status, 400);
+  assert.equal((await share([{ name: 'Aama', phone: '9811111111' }], bikeDrv.token)).status, 403, 'the rider driving cannot share it');
+  let mark = smsSent.length; // later tests read the whole SMS history: look only at what this test sends
+  const r = await share([{ name: 'Aama', phone: '+977 981-1111111' }, { name: 'Didi', phone: '9822222222' }, { name: 'Me', phone: '9846000001' }]);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.sharedWith.map((c) => c.phone), ['9811111111', '9822222222'], 'numbers cleaned, own number skipped');
+  await new Promise((ok) => setImmediate(ok));
+  const texts = smsSent.slice(mark).filter((s) => ['9811111111', '9822222222'].includes(s.phone));
+  assert.equal(texts.length, 2);
+  assert.match(texts[0].text, /Aarati is on a trip .*Follow live: .*\/track\.html\?t=/);
+  assert.equal((await share([{ name: 'Aama again', phone: '9811111111' }])).body.sharedWith.length, 2, 'no duplicate SMS');
+  const profile = (await api('GET', '/api/profile', null, rider.token)).body;
+  assert.deepEqual(profile.closeContacts.map((c) => c.name).slice(0, 2), ['Aama', 'Didi'], 'remembered for next time');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  mark = smsSent.length;
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  await new Promise((ok) => setImmediate(ok));
+  assert.equal(smsSent.slice(mark).filter((s) => /has arrived at/.test(s.text)).length, 2);
+  assert.equal((await share([{ name: 'Late', phone: '9833333333' }])).status, 409, 'sharing ends with the trip');
+  assert.equal((await api('DELETE', '/api/profile/close-contacts/9822222222', null, rider.token)).body.closeContacts.some((c) => c.phone === '9822222222'), false);
+});
+
+test('stops: up to 2 on the way, priced on the whole route; the rider marks each stop done', async () => {
+  const body = { pickup: P('lakeside'), drop: P('prithvi-chowk'), kind: 'ride' };
+  const direct = (await api('POST', '/api/quote', body, rider.token)).body;
+  const via = (await api('POST', '/api/quote', { ...body, stops: [P('mahendrapul')] }, rider.token)).body;
+  assert.ok(via.route.km > direct.route.km, 'the detour adds distance');
+  const bikeDirect = direct.quotes.find((q) => q.service === 'bike'), bikeVia = via.quotes.find((q) => q.service === 'bike');
+  assert.ok(bikeVia.total >= bikeDirect.total, 'and is priced on the whole route');
+  assert.equal((await api('POST', '/api/quote', { ...body, stops: [P('damside'), P('bagar'), P('new-road')] }, rider.token)).status, 400, 'max 2 stops');
+  assert.equal((await api('POST', '/api/quote', { ...body, stops: [KTM] }, rider.token)).status, 422, 'stops stay within 20 km');
+  assert.equal((await api('POST', '/api/quote', { ...body, kind: 'delivery', stops: [P('damside')], parcel: { weightKg: 1 } }, rider.token)).status, 400, 'rides only');
+
+  const t = (await api('POST', '/api/trips', { service: 'bike', ...body, stops: [P('mahendrapul'), P('bagar')], payment: 'cash' }, rider.token)).body;
+  assert.deepEqual(t.stops.map((s) => s.label), ['Mahendrapul', 'Bagar']);
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  const offer = (await api('GET', `/api/trips/${t.id}`, null, bikeDrv.token)).body;
+  assert.equal(offer.stops.length, 2, 'the rider sees the stops');
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'not before the trip starts');
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).body.stopsDone, 1);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, rider.token)).status, 403, 'only the rider driving');
+  assert.equal((await api('GET', `/api/trips/${t.id}`, null, rider.token)).body.stopsDone, 1, 'the customer sees progress');
+  await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/next-stop`, {}, bikeDrv.token)).status, 409, 'no third stop');
+  assert.equal((await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token)).status, 200);
+});
+
+test('chat: customer and rider can message only while the trip is on; others cannot read it', async () => {
+  const t = (await api('POST', '/api/trips', { service: 'bike', pickup: P('lakeside'), drop: P('damside'), payment: 'cash' }, rider.token)).body;
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'hello?' }, rider.token)).status, 409, 'no rider yet');
+  await api('POST', `/api/trips/${t.id}/accept`, {}, bikeDrv.token);
+  const sent = await api('POST', `/api/trips/${t.id}/messages`, { text: "  I'm at the blue gate  " }, rider.token);
+  assert.equal(sent.status, 200);
+  assert.deepEqual([sent.body.from, sent.body.text], ['rider', "I'm at the blue gate"]);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'Coming in 2 min' }, bikeDrv.token)).status, 200);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: '   ' }, rider.token)).status, 400);
+  const outsider = await login('9846000099', 'Someone Else');
+  assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, outsider.token)).status, 403);
+  const thread = (await api('GET', `/api/trips/${t.id}/messages`, null, bikeDrv.token)).body;
+  assert.deepEqual(thread.map((m) => m.from), ['rider', 'driver']);
+  await api('POST', `/api/trips/${t.id}/arrived`, {}, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/start`, { pin: t.pin }, bikeDrv.token);
+  await api('POST', `/api/trips/${t.id}/complete`, {}, bikeDrv.token);
+  assert.equal((await api('POST', `/api/trips/${t.id}/messages`, { text: 'thanks!' }, rider.token)).status, 409, 'chat closes with the trip');
+  assert.equal((await api('GET', `/api/trips/${t.id}/messages`, null, rider.token)).body.length, 2, 'history stays readable');
+});
+
 test('MyRide Plus: sandbox checkout activates membership; 5% (max Rs 25) applied; free cancellation after driver waits', async () => {
   const pay = await api('POST', '/api/membership/checkout', { plan: 'plus_yearly', payment: 'esewa' }, rider.token);
   assert.equal(pay.body.provider, 'esewa');

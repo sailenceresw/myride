@@ -10,8 +10,9 @@ export type Pt = { lat: number; lng: number };
  * vehicle: top-down car / bike pointing along `heading` (`vehicle` = vehicle type) · me: pulsing location dot.
  */
 export type MapMarker = {
-  key: string; at: Pt; kind?: 'pickup' | 'drop' | 'vehicle' | 'me'; color?: string;
+  key: string; at: Pt; kind?: 'pickup' | 'drop' | 'stop' | 'vehicle' | 'me'; color?: string; // stop: small grey square
   label?: string; eta?: string; vehicle?: string; heading?: number | null; emoji?: string; size?: number;
+  badge?: string; // short text inside the pin (stop number)
 };
 export type MapLine = { coords: Pt[]; color: string; width: number; casing?: boolean };
 export type Padding = { top: number; right: number; bottom: number; left: number };
@@ -25,6 +26,7 @@ type Props = { markers?: MapMarker[]; lines?: MapLine[]; user?: Pt | null; paddi
 const PAD: Padding = { top: 0, right: 0, bottom: 0, left: 0 };
 const ll = ({ lat, lng }: Pt) => ({ latitude: lat, longitude: lng });
 const INK = '#111111';
+const STOP = '#6b7273'; // stops on the way: grey, so the destination stays the one black square
 
 /**
  * The app's map: same props on both backends.
@@ -96,7 +98,9 @@ function NativeMap({ markers = [], lines = [], user, padding, traffic, onUserPan
                     <Text style={[styles.labelText, dark && { color: '#fff' }]} numberOfLines={1}>{m.label}</Text>
                   </View>
                 )}
-                <View style={[styles.pin, m.kind === 'drop' && { borderRadius: 3 }, { backgroundColor: m.color ?? fg }]}><View style={[styles.pinDot, m.kind === 'drop' && { borderRadius: 1 }, { backgroundColor: dark ? INK : '#fff' }]} /></View>
+                <View style={[styles.pin, m.kind !== 'pickup' && { borderRadius: 3 }, m.kind === 'stop' && { width: 16, height: 16 }, { backgroundColor: m.color ?? (m.kind === 'stop' ? STOP : fg) }]}>
+                  {m.badge ? <Text style={styles.badge}>{m.badge}</Text> : <View style={[styles.pinDot, m.kind !== 'pickup' && { borderRadius: 1 }, { backgroundColor: dark ? INK : '#fff' }]} />}
+                </View>
                 <View style={[styles.stem, { backgroundColor: m.color ?? fg }]} />
               </View>}
         </Marker>
@@ -113,15 +117,16 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 body.dark,body.dark #m{background:#1c1e1f}
 .maplibregl-ctrl-attrib{font-size:9px}body.dark .maplibregl-ctrl-attrib{background:#1c1e1fa0;color:#888}body.dark .maplibregl-ctrl-attrib a{color:#888}
 .pw{display:flex;flex-direction:column;align-items:center}
-.lab{display:flex;align-items:stretch;background:#fff;border-radius:6px;box-shadow:0 3px 10px #0003;overflow:hidden;margin-bottom:6px;max-width:210px}
+.lab{display:flex;align-items:stretch;background:#fff;border-radius:6px;box-shadow:0 2px 8px #0003;overflow:hidden;margin-bottom:5px;max-width:160px}
 body.dark .lab{background:#1f2122}
-.lab b{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#111;color:#fff;font:800 14px/1 inherit;padding:5px 8px;min-width:30px}
-.lab b small{font:600 9px/1.2 inherit;opacity:.85}
-.lab span{display:flex;align-items:center;gap:6px;color:#111;font:700 13px/1.2 inherit;padding:8px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-body.dark .lab span{color:#fff}.lab span:after{content:'›';font-size:16px;color:#999}
+.lab b{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#111;color:#fff;font:800 12px/1 inherit;padding:4px 6px;min-width:24px}
+.lab b small{font:600 8px/1.2 inherit;opacity:.85}
+.lab span{display:block;color:#111;font:700 11px/1.2 inherit;padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.dark .lab span{color:#fff}
 .pin{width:18px;height:18px;border-radius:50%;background:#111;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #0004}
 .pin.sq{border-radius:3px}.pin i{width:6px;height:6px;border-radius:50%;background:#fff}.pin.sq i{border-radius:1px}
 .stem{width:2px;height:12px;background:#111}
+.pin.st{width:16px;height:16px;background:${STOP};color:#fff;font:900 10px/1 inherit}.pin.st+.stem{background:${STOP};height:8px}
 body.dark .pin,body.dark .stem{background:#fff}body.dark .pin i{background:#111}
 .veh{display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 2px #0005);transition:transform .8s}
 .me{position:relative;width:18px;height:18px}.me b{position:absolute;inset:0;border-radius:50%;background:#276ef1;border:3px solid #fff;box-shadow:0 1px 4px #0006}
@@ -146,7 +151,7 @@ const markerEl=m=>{
   if(m.kind==='vehicle')return el('<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center">'+vehicle(m)+'</div>');
   const eta=m.eta?String(m.eta).split(' '):null;
   return el('<div class="pw">'+(m.label?'<div class="lab">'+(eta?'<b>'+esc(eta[0])+(eta[1]?'<small>'+esc(eta.slice(1).join(' '))+'</small>':'')+'</b>':'')+'<span>'+esc(m.label)+'</span></div>':'')
-    +'<div class="pin'+(m.kind==='drop'?' sq':'')+'"'+(m.color?' style="background:'+m.color+'"':'')+'><i></i></div><div class="stem"'+(m.color?' style="background:'+m.color+'"':'')+'></div></div>');};
+    +'<div class="pin'+(m.kind==='drop'?' sq':m.kind==='stop'?' sq st':'')+'"'+(m.color?' style="background:'+m.color+'"':'')+'>'+(m.badge?esc(m.badge):'<i></i>')+'</div><div class="stem"'+(m.color?' style="background:'+m.color+'"':'')+'></div></div>');};
 const send=t=>window.ReactNativeWebView.postMessage(t);
 map.on('dragstart',()=>send('pan'));
 map.on('moveend',()=>{const c=map.getCenter();send('idle:'+c.lat.toFixed(6)+','+c.lng.toFixed(6));});
@@ -215,5 +220,6 @@ const styles = StyleSheet.create({
   labelText: { fontSize: 13, fontWeight: '700', color: INK, paddingHorizontal: 10, paddingVertical: 8 },
   pin: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3 },
   pinDot: { width: 6, height: 6, borderRadius: 3 },
+  badge: { color: '#fff', fontSize: 10, fontWeight: '900' },
   stem: { width: 2, height: 12 },
 });

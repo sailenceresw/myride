@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Button, Card, Chip, Icon, Plate, Pulse, Row, Steps, Txt, type IconName } from '@/components/ui';
-import { apiUrlFor, rs, type Point, type Trip } from '@/lib/api';
+import { rs, type Point, type Trip } from '@/lib/api';
 import { call } from '@/lib/config';
 import { RADIUS, useTheme, vehicleEmoji } from '@/lib/theme';
 import { useNow } from '@/lib/useNow';
@@ -24,13 +24,14 @@ const roadMin = (a: Point, b: Point) => {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 /** The customer's current trip: live ETA, rider, PIN, call / share / SOS, receipt and rating. */
-export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip: Trip; err: string; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void }) {
+export function TripPanel({ trip, err, unread, onMessage, onShare, onCancel, onRate, onSos, onDone }: {
+  trip: Trip; err: string; unread: number; onMessage: () => void; onShare: () => void; onCancel: () => void; onRate: (s: number, comment: string) => void; onSos: () => void; onDone: () => void;
+}) {
   const t = useTheme();
   const now = useNow();
   const d = trip.driver;
   const is = (...s: string[]) => s.includes(trip.status);
   const live =is('accepted', 'arrived', 'in_progress');
-  const share = () => Share.share({ message: `Track my MyRide trip live: ${apiUrlFor(`/track.html?t=${trip.shareToken}`)}` });
   // Live ETA from the rider's position, like Uber's "Arriving in 3 min" / "Arrive by 4:32 PM".
   const headline = is('accepted') && d?.loc ? `Arriving in ${roadMin(d.loc, trip.pickup)} min`
     : is('in_progress') && d?.loc ? `Arrive by ${clock(now + roadMin(d.loc, trip.drop) * 60000)}`
@@ -41,11 +42,21 @@ export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip
         <View style={{ flex: 1 }}>
           <Txt kind="h1">{headline}</Txt>
           {headline !== STATUS[trip.status] && <Txt style={{ fontWeight: '700' }}>{STATUS[trip.status]}</Txt>}
-          <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
+          <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.stops?.length ? `${trip.stops.length} stop${trip.stops.length > 1 ? 's' : ''} → ` : ''}{trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
         </View>
         {is('searching') && <Pulse size={52} color={t.brand}><View style={[styles.pulseCore, { backgroundColor: t.brand }]}><Text style={{ fontSize: 22 }}>{vehicleEmoji(trip.service)}</Text></View></Pulse>}
       </Row>
       {trip.status in STEP_OF && <Steps steps={['Booked', 'Coming', 'Pickup', 'On trip']} at={STEP_OF[trip.status]} />}
+      {is('in_progress') && !!trip.stops?.length && (() => {
+        const done = trip.stopsDone ?? 0;
+        const next = trip.stops[done];
+        return (
+          <Row style={{ marginTop: 6 }}>
+            <Icon name={next ? 'flag-outline' : 'checkmark-done'} size={16} color={t.brand} />
+            <Txt kind="small" style={{ flex: 1 }}>{next ? `Next: stop ${done + 1} of ${trip.stops.length}, ${next.label}` : `Stops done: on to ${trip.drop.label}`}</Txt>
+          </Row>
+        );
+      })()}
       {is('searching') && <Txt kind="small">Offering your trip to the nearest riders…</Txt>}
       {is('scheduled') && !!trip.scheduledAt && (
         <Row style={{ marginTop: 8 }}>
@@ -73,10 +84,16 @@ export function TripPanel({ trip, err, onCancel, onRate, onSos, onDone }: { trip
 
       {live && d && (
         <Row style={{ marginTop: 10 }}>
+          <Action icon="chatbubble-ellipses" label="Message" onPress={onMessage} badge={unread} />
           <Action icon="call" label="Call" onPress={() => call(d.phone)} />
-          <Action icon="share-social" label="Share trip" onPress={share} />
+          <Action icon="share-social" label="Share trip" onPress={onShare} />
           <Action icon="warning" label="SOS" onPress={onSos} danger />
         </Row>
+      )}
+      {live && !!trip.sharedWith?.length && (
+        <Pressable onPress={onShare} style={{ marginTop: 8 }}>
+          <Row><Icon name="eye-outline" size={16} color={t.ok} /><Txt kind="small" style={{ flex: 1 }}>Following your trip: {trip.sharedWith.map((c) => c.name.split(' ')[0]).join(', ')}</Txt></Row>
+        </Pressable>
       )}
 
       {!is('completed') && (
@@ -137,11 +154,12 @@ function Rating({ trip, onRate }: { trip: Trip; onRate: (s: number, comment: str
   );
 }
 
-function Action({ icon, label, onPress, danger }: { icon: IconName; label: string; onPress: () => void; danger?: boolean }) {
+function Action({ icon, label, onPress, danger, badge }: { icon: IconName; label: string; onPress: () => void; danger?: boolean; badge?: number }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.action, { backgroundColor: danger ? t.dangerSoft : t.chip, opacity: pressed ? 0.7 : 1 }]}>
+    <Pressable onPress={onPress} accessibilityLabel={badge ? `${label}, ${badge} unread` : label} style={({ pressed }) => [styles.action, { backgroundColor: danger ? t.dangerSoft : t.chip, opacity: pressed ? 0.7 : 1 }]}>
       <Icon name={icon} size={20} color={danger ? t.danger : t.ink} /><Text style={{ fontSize: 12, fontWeight: '700', color: danger ? t.danger : t.ink }}>{label}</Text>
+      {!!badge && <View style={[styles.badge, { backgroundColor: t.danger }]}><Text style={styles.badgeText}>{badge > 9 ? '9+' : badge}</Text></View>}
     </Pressable>
   );
 }
@@ -162,5 +180,7 @@ const styles = StyleSheet.create({
   action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
   pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: 6, right: 14, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   comment: { alignSelf: 'stretch', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
 });

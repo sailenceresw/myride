@@ -7,6 +7,8 @@ import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
 import { MapPicker } from '@/components/MapPicker';
 import { PlaceSearch, type Kind, type Place, type Shortcut } from '@/components/PlaceSearch';
 import { QuoteRow } from '@/components/QuoteRow';
+import { ShareTrip } from '@/components/ShareTrip';
+import { TripChat } from '@/components/TripChat';
 import { TripPanel } from '@/components/TripPanel';
 import { Button, Chip, Icon, RoundButton, Row, Sheet, Txt, type IconName } from '@/components/ui';
 import { api, rs, type Point, type Quote, type Trip } from '@/lib/api';
@@ -17,6 +19,7 @@ import { useLocation } from '@/lib/useLocation';
 import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 import { useSavedPlaces, type SavedKey } from '@/lib/useSavedPlaces';
+import { useTripChat } from '@/lib/useTripChat';
 
 type QuoteResp = { route: { km: number; min: number; geometry: [number, number][] }; quotes: Quote[]; pickupWard: string | null; dropWard: string | null; recommend: string | null; promoError: string | null };
 
@@ -28,7 +31,9 @@ const QUICK: Record<string, [string, IconName]> = {
   lakeside: ['Lakeside', 'boat-outline'], 'prithvi-chowk': ['Prithvi Chowk', 'git-network-outline'], chipledhunga: ['Chipledhunga', 'cart-outline'],
 };
 const SAVED: Record<SavedKey, [string, IconName]> = { home: ['Home', 'home'], work: ['Work', 'briefcase'] };
-const SEARCH_TITLE = { pickup: 'Pickup point', drop: 'Where to?', home: 'Set your Home', work: 'Set your Work' };
+const SEARCH_TITLE = { pickup: 'Pickup point', drop: 'Where to?', stop: 'Add a stop', home: 'Set your Home', work: 'Set your Work' };
+const MAX_STOPS = 2; // like Uber; the server checks it too
+type Field = 'pickup' | 'drop' | 'stop' | SavedKey;
 const short = (s?: string) => (s ?? 'Drop').replace(/ \(.*\)$/, '').slice(0, 24); // "Talchowk (Lekhnath)" → "Talchowk"
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 const asPoint = (p: Place): Point => ({ lat: p.lat, lng: p.lng, label: p.name });
@@ -58,13 +63,16 @@ export default function CustomerHome() {
   const [kind, setKind] = useState<Kind>('ride');
   const [pickupChoice, setPickup] = useState<Point | null>(null);
   const [drop, setDrop] = useState<Point | null>(null);
-  const [searching, setSearching] = useState<null | 'pickup' | 'drop' | SavedKey>(null);
-  const [picking, setPicking] = useState<null | 'pickup' | 'drop' | SavedKey>(null); // "set on map"
+  const [searching, setSearching] = useState<null | Field>(null);
+  const [picking, setPicking] = useState<null | Field>(null); // "set on map"
+  const [stops, setStops] = useState<Point[]>([]); // rides: stops on the way, in order
+  const [stopEdit, setStopEdit] = useState<number | null>(null); // which stop the search / map picker is for (null = a new one)
   const [hereAddr, setHereAddr] = useState<{ label: string; at: Point } | null>(null);
   const { places: saved, save } = useSavedPlaces();
   const [promo, setPromo] = useState(''); // typed code
   const [promoApplied, setPromoApplied] = useState<string | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState(''); // for the rider: "blue gate opposite the school"
   const [noteOpen, setNoteOpen] = useState(false);
   const [places, setPlaces] = useState<Place[]>([]);
@@ -133,24 +141,27 @@ export default function CustomerHome() {
     if (next.status !== trip?.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTrip(next);
   };
+  // Chat with the rider once one has accepted (messages stay readable after the trip).
+  const chat = useTripChat(trip?.driver ? trip.id : null, 'rider');
+  const chatOpen = !!trip && ['accepted', 'arrived', 'in_progress'].includes(trip.status);
   // Server events say role 'rider' for the customer (legacy server naming, see mobile/AGENTS.md).
-  useEvents((e) => { if (e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
-  usePolling(async () => update(await api<Trip>('GET', `/api/trips/${trip!.id}`)), 15000, live);
+  useEvents((e) => { if (!chat.receive(e) && e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
+  usePolling(async () => { update(await api<Trip>('GET', `/api/trips/${trip!.id}`)); if (trip?.driver) await chat.refresh(); }, 15000, live);
 
   // Vehicles around the pickup (or around Pokhara's centre while the user is outside the city).
   const around = pickup ?? (outside ? city!.centre : null);
   usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${around!.lat}&lng=${around!.lng}`)), 8000, !trip && !!around);
 
-  const getQuote = useCallback(async (p: Point, d: Point, k: Kind, promoCode: string | null = promoApplied) => {
+  const getQuote = useCallback(async (p: Point, d: Point, k: Kind, promoCode: string | null = promoApplied, via: Point[] = stops) => {
     setErr(''); setBusy(true);
     try {
-      const r = await api<QuoteResp>('POST', '/api/quote', { pickup: p, drop: d, kind: k, promoCode: promoCode ?? undefined, parcel: k === 'ride' ? undefined : { weightKg: +weight || 1 } });
+      const r = await api<QuoteResp>('POST', '/api/quote', { pickup: p, drop: d, kind: k, stops: k === 'ride' && via.length ? via : undefined, promoCode: promoCode ?? undefined, parcel: k === 'ride' ? undefined : { weightKg: +weight || 1 } });
       setQuote(r);
       setSel(r.recommend ?? r.quotes.find((q) => !q.unavailable)?.service ?? null);
       if (r.promoError) { setErr(r.promoError); setPromoApplied(null); }
     } catch (e) { setErr((e as Error).message); setQuote(null); }
     setBusy(false);
-  }, [weight, promoApplied]);
+  }, [weight, promoApplied, stops]);
 
   // "Book again": the same pickup, destination and kind of trip, freshly quoted. Each link is handled once
   // (remembered, not cleared: navigating while the app is still starting from the link would crash the router).
@@ -161,8 +172,8 @@ export default function CustomerHome() {
     rebooked.current = id;
     api<Trip>('GET', `/api/trips/${id}`).then((old) => {
       const k: Kind = old.logistics ? 'logistics' : old.kind === 'delivery' ? 'delivery' : 'ride';
-      setPickup(old.pickup); setDrop(old.drop); setKind(k);
-      getQuote(old.pickup, old.drop, k);
+      setPickup(old.pickup); setDrop(old.drop); setKind(k); setStops(old.stops ?? []);
+      getQuote(old.pickup, old.drop, k, null, old.stops ?? []);
     }).catch((e) => setErr((e as Error).message));
   }, [params.rebook, getQuote]);
 
@@ -183,6 +194,14 @@ export default function CustomerHome() {
 
   function choose(p: Point | null, field = searchMode) { // null = back to current location
     if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: p.label && p.label !== 'Current location' ? p.label : SAVED[field][0] }); setSearching(null); endLink(); return; }
+    if (field === 'stop') {
+      setSearching(null); setStopEdit(null);
+      if (!p) return;
+      const next = stopEdit !== null && stopEdit < stops.length ? stops.map((s, i) => (i === stopEdit ? p : s)) : [...stops, p].slice(0, MAX_STOPS);
+      setStops(next);
+      if (pickup && drop) getQuote(pickup, drop, kind, promoApplied, next);
+      return;
+    }
     const nextPickup = field === 'pickup' ? p ?? here : pickup;
     const nextDrop = field === 'drop' ? p : drop;
     if (field === 'pickup') setPickup(p); else setDrop(p);
@@ -191,9 +210,16 @@ export default function CustomerHome() {
   }
   function chooseKind(k: Kind) {
     setKind(k);
-    if (pickup && drop) getQuote(pickup, drop, k);
+    if (k !== 'ride') setStops([]); // stops are for rides
+    if (pickup && drop) getQuote(pickup, drop, k, promoApplied, k === 'ride' ? stops : []);
   }
-  const clearDrop = () => { setDrop(null); setQuote(null); setErr(''); if (fix) map.current?.flyTo(fix, { zoom: 16 }); };
+  const editStop = (i: number | null) => { setStopEdit(i); setSearching('stop'); };
+  const removeStop = (i: number) => {
+    const next = stops.filter((_, j) => j !== i);
+    setStops(next);
+    if (pickup && drop) getQuote(pickup, drop, kind, promoApplied, next);
+  };
+  const clearDrop = () => { setDrop(null); setStops([]); setQuote(null); setErr(''); if (fix) map.current?.flyTo(fix, { zoom: 16 }); };
   const closeSearch = () => { setSearching(null); endLink(); };
 
   async function book() {
@@ -202,9 +228,10 @@ export default function CustomerHome() {
     try {
       const goods = kind === 'ride' ? {} : { parcel: { weightKg: +weight || 1 }, recipient: receiver };
       const scheduledAt = when ? new Date(when).toISOString() : undefined;
-      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, scheduledAt, note: note.trim() || undefined, ...goods }));
+      const via = kind === 'ride' && stops.length ? stops : undefined;
+      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, stops: via, payment, promoCode: promoApplied ?? undefined, scheduledAt, note: note.trim() || undefined, ...goods }));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      setQuote(null); setWhen(null); setWhenOpen(false); setNote(''); setNoteOpen(false);
+      setQuote(null); setWhen(null); setWhenOpen(false); setNote(''); setNoteOpen(false); setStops([]);
     } catch (e) { setErr((e as Error).message); }
     setBusy(false);
   }
@@ -224,14 +251,17 @@ export default function CustomerHome() {
     try { await api('POST', `/api/trips/${trip!.id}/rate`, { stars, comment }); setTrip({ ...trip!, riderRating: { stars } }); } catch (e) { setErr(`Rating not saved: ${(e as Error).message}`); }
   };
   const sos = () => { api('POST', `/api/trips/${trip!.id}/sos`, { loc: fix }).catch(() => {}); call(POLICE); }; // always call the police, even if MyRide is unreachable
-  const reset = () => { setTrip(null); setDrop(null); setQuote(null); setPromoApplied(null); setErr(''); refresh(); loadTrips(); };
+  const reset = () => { setTrip(null); setDrop(null); setStops([]); setQuote(null); setPromoApplied(null); setErr(''); refresh(); loadTrips(); };
   const applyPromo = () => { const code = promo.trim().toUpperCase(); if (!code || !pickup || !drop) return; setPromoApplied(code); setPromoOpen(false); getQuote(pickup, drop, kind, code); };
 
   const selected = quote?.quotes.find((q) => q.service === sel);
   const pk = trip?.pickup ?? pickup, dp = trip?.drop ?? drop;
+  const vias = trip ? trip.stops ?? [] : stops;
   const markers: MapMarker[] = [
-    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
+    // Nearby vehicles only before a destination is chosen: on the fare screen they would hide the route.
+    ...(trip || drop ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
     ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : short(pk.label === 'Current location' ? 'Pickup' : pk.label) }] : []),
+    ...vias.map((s, i) => ({ key: `stop${i}`, at: s, kind: 'stop' as const, badge: String(i + 1) })), // numbered pin, no label: keeps the route visible
     ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: short(dp.label), eta: quote && !trip ? `${Math.round(quote.route.min)} min` : undefined }] : []),
     ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, vehicle: trip.driver.vehicle.type, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
   ];
@@ -239,9 +269,9 @@ export default function CustomerHome() {
 
   // ---------- set on map ----------
   if (picking) {
-    const current = picking === 'pickup' ? pickup : picking === 'drop' ? drop : saved[picking];
+    const current = picking === 'pickup' ? pickup : picking === 'drop' ? drop : picking === 'stop' ? (stopEdit !== null ? stops[stopEdit] : drop) : saved[picking];
     const start = current ?? here ?? city?.centre ?? { lat: 28.2096, lng: 83.9856 };
-    const confirm = picking === 'pickup' ? 'Confirm pickup' : picking === 'drop' ? 'Confirm destination' : `Save as ${SAVED[picking][0]}`;
+    const confirm = picking === 'pickup' ? 'Confirm pickup' : picking === 'drop' ? 'Confirm destination' : picking === 'stop' ? 'Add this stop' : `Save as ${SAVED[picking][0]}`;
     return <MapPicker title={SEARCH_TITLE[picking]} start={start} user={fix} inCityOnly={picking === 'pickup'} confirmLabel={confirm} onConfirm={(p) => { const f = picking; setPicking(null); choose(p, f); }} onClose={() => setPicking(null)} />;
   }
 
@@ -249,7 +279,7 @@ export default function CustomerHome() {
   if (searchMode) {
     const shortcuts: Shortcut[] =
       searchMode === 'pickup' ? (here ? [{ key: 'here', icon: 'locate', title: 'Use current location', subtitle: 'GPS', onPress: () => choose(null) }] : [])
-        : searchMode === 'drop' ? [
+        : searchMode === 'drop' || searchMode === 'stop' ? [
           ...(Object.keys(SAVED) as SavedKey[]).flatMap((k): Shortcut[] => (saved[k] ? [{ key: k, icon: SAVED[k][1], title: SAVED[k][0], subtitle: 'Saved place', onPress: () => choose(saved[k]!) }] : [])),
           ...recent.map((p): Shortcut => ({ key: `r${p.label}`, icon: 'time-outline', title: p.label!, subtitle: 'Recent', onPress: () => choose(p) })),
         ]
@@ -258,7 +288,7 @@ export default function CustomerHome() {
       <PlaceSearch
         title={SEARCH_TITLE[searchMode]} places={places} kind={kind} near={pickup ?? (outside ? city?.centre ?? null : here)} shortcuts={shortcuts}
         onPick={(p) => choose(asPoint(p))} onMap={() => { setPicking(searchMode); setSearching(null); endLink(); }}
-        onClose={closeSearch} failed={placesFailed} onRetry={loadPlaces}
+        onClose={() => { closeSearch(); setStopEdit(null); }} failed={placesFailed} onRetry={loadPlaces}
       />
     );
   }
@@ -293,6 +323,7 @@ export default function CustomerHome() {
 
       <Sheet
         onHeight={setSheetH}
+        maxHeight={drop && !trip ? '56%' : undefined} // choosing a ride: leave the map room for the whole route (the list scrolls)
         footer={!trip && selected ? (
           <>
             {promoOpen && (
@@ -316,7 +347,7 @@ export default function CustomerHome() {
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} err={err} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} unread={chat.unread} onMessage={chat.open} onShare={() => setShareOpen(true)} onCancel={confirmCancel} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
@@ -371,17 +402,30 @@ export default function CustomerHome() {
               </>
             ) : (
               <>
+                {/* Pickup, stops on the way (rides, up to 2) and destination: tap one to change it. */}
                 <View style={[styles.route, { backgroundColor: t.chip }]}>
-                  <View style={{ alignItems: 'center', gap: 3 }}>
-                    <View style={[styles.dot, { backgroundColor: t.ink }]} /><View style={{ width: 2, height: 18, backgroundColor: t.line }} /><View style={[styles.dot, { backgroundColor: t.ink, borderRadius: 2 }]} />
-                  </View>
-                  <View style={{ flex: 1, gap: 14 }}>
-                    <Pressable onPress={() => setSearching('pickup')}><Txt numberOfLines={1}>{pickup?.label ?? 'Locating you…'}</Txt></Pressable>
-                    <Pressable onPress={() => setSearching('drop')}><Txt numberOfLines={1} style={{ fontWeight: '800' }}>{drop.label}</Txt></Pressable>
-                  </View>
-                  <Pressable onPress={clearDrop} hitSlop={10} accessibilityLabel="Clear destination"><Icon name="close" size={22} color={t.muted} /></Pressable>
+                  <RouteRow marker={<View style={[styles.dot, { backgroundColor: t.ink }]} />} label={pickup?.label ?? 'Locating you…'} onPress={() => setSearching('pickup')} />
+                  {stops.map((s, i) => (
+                    <RouteRow key={`${i}${s.label}`} marker={<View style={[styles.stopMark, { borderColor: t.ink }]}><Text style={{ fontSize: 9, fontWeight: '900', color: t.ink }}>{i + 1}</Text></View>}
+                      label={s.label ?? `Stop ${i + 1}`} onPress={() => editStop(i)}
+                      action={<Pressable onPress={() => removeStop(i)} hitSlop={10} accessibilityLabel={`Remove stop ${i + 1}`}><Icon name="close-circle" size={20} color={t.muted} /></Pressable>} />
+                  ))}
+                  <RouteRow marker={<View style={[styles.dot, { backgroundColor: t.ink, borderRadius: 2 }]} />} label={drop.label ?? 'Destination'} bold onPress={() => setSearching('drop')}
+                    action={<Pressable onPress={clearDrop} hitSlop={10} accessibilityLabel="Clear route"><Icon name="close" size={22} color={t.muted} /></Pressable>} />
+                  {kind === 'ride' && stops.length < MAX_STOPS && (
+                    <Pressable onPress={() => editStop(null)} style={styles.addStop} accessibilityRole="button">
+                      <Icon name="add-circle-outline" size={18} color={t.brand} /><Text style={{ color: t.brand, fontWeight: '700' }}>Add stop</Text>
+                    </Pressable>
+                  )}
                 </View>
-                {!!quote && <Txt kind="small" style={{ marginVertical: 6 }}>{quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min{quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}</Txt>}
+                {!!quote && (
+                  <Txt kind="small" style={{ marginVertical: 6 }} numberOfLines={2}>
+                    {quote.route.km.toFixed(1)} km · {Math.round(quote.route.min)} min
+                    {stops.length
+                      ? ` · ${stops.length} stop${stops.length > 1 ? 's' : ''}, keep each about 2 min`
+                      : quote.pickupWard === quote.dropWard ? (quote.pickupWard ? ` · within ${quote.pickupWard}` : '') : `${quote.pickupWard ? ` · ${quote.pickupWard}` : ''}${quote.dropWard ? ` → ${quote.dropWard}` : ''}`}
+                  </Txt>
+                )}
 
                 {kind !== 'ride' && (
                   <View style={{ gap: 8, marginVertical: 6 }}>
@@ -402,7 +446,33 @@ export default function CustomerHome() {
           </ScrollView>
         )}
       </Sheet>
+
+      {trip && live && (
+        <ShareTrip
+          visible={shareOpen} onClose={() => setShareOpen(false)} trip={trip} saved={profile?.closeContacts ?? []}
+          onShared={(sharedWith) => { setTrip({ ...trip, sharedWith }); refresh(); }}
+        />
+      )}
+      {trip?.driver && (
+        <TripChat
+          visible={chat.visible} onClose={chat.close} tripId={trip.id} me="rider" open={chatOpen}
+          name={trip.driver.name} subtitle={`${trip.driver.vehicle.model} · ${trip.driver.vehicle.plate}`} phone={trip.driver.phone}
+          messages={chat.messages} onSent={chat.sent}
+          quickReplies={trip.status === 'in_progress' ? ['Please slow down', 'Stop here, please', 'Thank you!'] : ["I'm at the pickup", "I'll be there in 2 min", 'Where are you?', 'Please wait a moment', 'Okay 👍']}
+        />
+      )}
     </View>
+  );
+}
+
+/** One point of the route card: marker, place (tap to change) and an optional action on the right. */
+function RouteRow({ marker, label, bold, onPress, action }: { marker: React.ReactNode; label: string; bold?: boolean; onPress: () => void; action?: React.ReactNode }) {
+  return (
+    <Row style={{ gap: 12, minHeight: 34 }}>
+      <View style={{ width: 16, alignItems: 'center' }}>{marker}</View>
+      <Pressable onPress={onPress} style={{ flex: 1 }}><Txt numberOfLines={1} style={bold ? { fontWeight: '800' } : undefined}>{label}</Txt></Pressable>
+      {action}
+    </Row>
   );
 }
 
@@ -417,7 +487,9 @@ const styles = StyleSheet.create({
   recent: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
   recentIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   from: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 4 },
-  route: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: RADIUS.md, padding: 14 },
+  route: { borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8, gap: 2 },
+  stopMark: { width: 14, height: 14, borderRadius: 3, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  addStop: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingLeft: 28 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   small: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
 });
