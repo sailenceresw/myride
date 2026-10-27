@@ -21,6 +21,6 @@ if (process.env.SIMULATE === '1') {
 }
 
 const server = app.listen(PORT, () => console.log(`MyRide running on http://localhost:${PORT}  (driver: /driver.html, admin: /admin.html)`));
-const shutdown = () => { store.flush(); server.close(() => process.exit(0)); };
+const shutdown = () => { store.close(); server.close(() => process.exit(0)); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

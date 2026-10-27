@@ -50,7 +50,7 @@ export default function Activity() {
               <Stat icon="map-outline" value={`${done.reduce((a, x) => a + x.route.km, 0).toFixed(0)} km`} label="travelled" />
               <Stat icon="wallet-outline" value={rs(done.reduce((a, x) => a + x.fare, 0))} label="spent" />
             </Row>
-          ) : null}
+          ) : undefined}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Icon name="receipt-outline" size={56} color={t.line} />

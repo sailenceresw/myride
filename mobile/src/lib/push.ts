@@ -5,10 +5,18 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { api } from './api';
 
-// Expo Go (Android) has no remote-push native module, so expo-notifications is only loaded in dev/store builds.
+// Expo Go has no (or an older) remote-push native module, so expo-notifications is only loaded in dev/store builds;
+// if it still can't load (e.g. Expo Go 58 misses ExpoTopicSubscriptionModule), the app runs without push.
 type NotificationsModule = typeof import('expo-notifications');
-const N: NotificationsModule | null =
-  Constants.executionEnvironment === ExecutionEnvironment.StoreClient || Platform.OS === 'web' ? null : require('expo-notifications'); // eslint-disable-line @typescript-eslint/no-require-imports
+function loadNotifications(): NotificationsModule | null {
+  if (Platform.OS === 'web' || Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return null;
+  try {
+    return require('expo-notifications'); // eslint-disable-line @typescript-eslint/no-require-imports
+  } catch {
+    return null;
+  }
+}
+const N = loadNotifications();
 
 N?.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
