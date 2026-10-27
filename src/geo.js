@@ -5,6 +5,13 @@ const places = require('../data/places.json');
 const R = 6371;
 const rad = (x) => (x * Math.PI) / 180;
 
+/** Compass bearing from a to b in degrees (0 = north, 90 = east). */
+function bearing(a, b) {
+  const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat));
+  const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 function haversineKm(a, b) {
   const dLat = rad(b.lat - a.lat);
   const dLng = rad(b.lng - a.lng);
@@ -159,4 +166,4 @@ function alongPolyline(geometry, t) {
   }
 }
 
-module.exports = { haversineKm, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, navigationRoute, estimateRoute, route, nearestPlace, alongPolyline, places };
+module.exports = { haversineKm, bearing, isValidPoint, inServiceArea, inLaunchCity, cityOf, wardOf, inGeo, cities, navigationRoute, estimateRoute, route, nearestPlace, alongPolyline, places };

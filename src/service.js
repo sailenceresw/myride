@@ -1,7 +1,7 @@
 // MyRide business logic. Pure of HTTP so the API, the simulator and the tests share it.
 const crypto = require('crypto');
 const { SERVICES, DISPATCH, FIXED_ROUTES, GANDAKI, VEHICLES, MEMBERSHIP, LOGISTICS, PAYROLL, KYC } = require('./config');
-const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, nearestPlace, places } = require('./geo');
+const { route, inServiceArea, inLaunchCity, wardOf, isValidPoint, haversineKm, bearing, nearestPlace, places } = require('./geo');
 const { quote, applyDiscounts, deadKmPay, fixedFare } = require('./pricing');
 const { findCandidates, canServe, hoursLeftToday, isAvailable } = require('./dispatch');
 const rewards = require('./rewards');
@@ -677,6 +677,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
   function updateLocation(user, loc) {
     const d = driverOf(user) || fail(403, 'Not a driver');
     if (!isValidPoint(loc)) fail(400, 'Invalid location');
+    if (d.loc && haversineKm(d.loc, loc) > 0.005) d.heading = Math.round(bearing(d.loc, loc)); // moved > 5 m: keep the last real heading when parked
     d.loc = { lat: loc.lat, lng: loc.lng };
     accrueOnline(d);
     if (d.homeFilter && !d.currentTripId && haversineKm(d.loc, d.homeFilter) < 0.8) d.homeFilter = null; // arrived home
@@ -794,7 +795,7 @@ function createService({ store, bus = { emit() {} }, now = () => Date.now(), rou
     return store.all('drivers')
       .filter((d) => isAvailable(d, t) && haversineKm(d.loc, p) <= 3)
       .slice(0, 25)
-      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev' }));
+      .map((d) => ({ lat: round(d.loc.lat), lng: round(d.loc.lng), type: d.vehicle.type, ev: d.vehicle.fuel === 'ev', heading: d.heading ?? null }));
   }
 
   function stats() {

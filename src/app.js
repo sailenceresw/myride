@@ -3,7 +3,8 @@ const express = require('express');
 const { createService, HttpError } = require('./service');
 const { SERVICES, SAFETY, CITY, GANDAKI, FEDERAL_DRAFT, COMPLIANCE, VEHICLES, LOGISTICS, MEMBERSHIP, KYC, PAYROLL } = require('./config');
 const { quote, gandakiCap, federalCap } = require('./pricing');
-const { places, cities, navigationRoute, isValidPoint } = require('./geo');
+const { places, cities, navigationRoute, isValidPoint, wardOf } = require('./geo');
+const search = require('./search');
 const { createFiles } = require('./files');
 const { monthly, projection, compareVersions, fleetUnitEconomics, SCENARIOS, FIXED_COSTS } = require('./economics');
 const { batchCsv } = require('./payroll');
@@ -106,6 +107,18 @@ function createApp({ store, routeFn, navRouteFn = navigationRoute, now, rand, sm
   app.get('/api/places', (req, res) => {
     const wards = cities.pokhara.wards.map((w) => ({ id: `ward-${w.ward}`, name: `Ward ${w.ward} · ${w.name}`, category: 'ward', lat: w.lat, lng: w.lng, ward: w.ward }));
     res.json([...places.map(({ osm, ...p }) => p), ...wards]);
+  });
+  // Any named place in and around Pokhara (OpenStreetMap gazetteer), in Nepali or English, typos allowed.
+  app.get('/api/places/search', (req, res) => {
+    const q = String(req.query.q || '').slice(0, 80);
+    const near = { lat: +req.query.lat, lng: +req.query.lng };
+    res.json(search.search(q, { near: isValidPoint(near) ? near : null, limit: Math.min(+req.query.limit || 20, 40) }));
+  });
+  // Address of a point (pin on the map, GPS): place, street, area and ward.
+  app.get('/api/places/reverse', (req, res) => {
+    const p = { lat: +req.query.lat, lng: +req.query.lng };
+    if (!isValidPoint(p)) return res.status(400).json({ error: 'lat,lng required' });
+    res.json(search.reverse(p, wardOf));
   });
   app.get('/api/wards', (req, res) => res.json(cities.pokhara.wards.map(({ bbox, ...w }) => w)));
   app.get('/api/boundary', (req, res) => res.json(cities.pokhara.boundaryGeo));

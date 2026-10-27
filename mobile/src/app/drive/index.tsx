@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Navigator } from '@/components/Navigator';
 import { AppMap, type MapHandle } from '@/components/AppMap';
@@ -22,6 +22,11 @@ type Driver = {
 };
 type Dashboard = { driver: Driver | null; application: { status: string } | null };
 const ON_TRIP = ['accepted', 'arrived', 'in_progress'];
+const APPLICATION_STATUS: Record<string, string> = {
+  submitted: "Your application is being reviewed (usually within 48 hours). We'll SMS you when you're approved.",
+  resubmit: 'MyRide asked you to update your application. Open it to see what to change.',
+  rejected: 'Your application was not approved. Open it to see the reason.',
+};
 const buzz = (style = Haptics.ImpactFeedbackStyle.Medium) => Haptics.impactAsync(style).catch(() => {});
 
 export default function DriverHome() {
@@ -30,6 +35,7 @@ export default function DriverHome() {
   const { signOut } = useAuth();
   const map = useRef<MapHandle>(null);
   const [dash, setDash] = useState<Dashboard | null>(null);
+  const [unreachable, setUnreachable] = useState(false);
   const [offers, setOffers] = useState<DriverTrip[]>([]);
   const [trip, setTrip] = useState<DriverTrip | null>(null);
   const [simulate, setSimulate] = useState(false);
@@ -48,6 +54,7 @@ export default function DriverHome() {
 
   const load = useCallback(async () => {
     const r = await api<Dashboard>('GET', '/api/driver/dashboard').catch(() => null);
+    setUnreachable(!r);
     if (!r) return;
     setDash(r);
     const fc = r.driver?.faceCheck;
@@ -67,7 +74,7 @@ export default function DriverHome() {
     map.current?.flyTo(fix, { zoom: 15.5 });
   }, [fix, trip]);
 
-  // Report GPS while online (every ≥ 3 s) so dispatch and the rider's live map are accurate.
+  // Report GPS while online (every ≥ 3 s) so dispatch and the customer's live map are accurate.
   const report = useCallback((p: { lat: number; lng: number }) => {
     if (Date.now() - lastSent.current < 3000) return;
     lastSent.current = Date.now();
@@ -129,9 +136,27 @@ export default function DriverHome() {
     load();
   });
 
+  // ---------- first load: never show the GO screen before we know this is an approved rider ----------
+  if (!dash) {
+    return (
+      <View style={[styles.center, { backgroundColor: t.bg }]}>
+        {unreachable ? (
+          <>
+            <Icon name="cloud-offline-outline" size={56} color={t.muted} />
+            <Txt kind="h2">{"Can't reach MyRide"}</Txt>
+            <Txt kind="muted" style={{ textAlign: 'center' }}>Check your internet connection and try again.</Txt>
+            <Button title="Try again" icon="refresh" onPress={load} style={{ alignSelf: 'stretch' }} />
+            <Button title="Sign out" kind="ghost" onPress={signOut} style={{ alignSelf: 'stretch' }} />
+          </>
+        ) : <ActivityIndicator color={t.brand} size="large" />}
+      </View>
+    );
+  }
+
   // ---------- not yet approved ----------
-  if (dash && !d) {
-    const submitted = dash.application?.status === 'submitted';
+  if (!d) {
+    const status = dash.application?.status;
+    const submitted = status === 'submitted';
     const steps: [IconName, string, string][] = [
       ['person-outline', 'Identity', 'Citizenship + driving licence'],
       ['car-outline', 'Vehicle', 'Bluebook, insurance, number plate'],
@@ -142,11 +167,11 @@ export default function DriverHome() {
       <View style={{ flex: 1, backgroundColor: t.bg }}>
         <Hero style={{ paddingBottom: 40 }}>
           <Text style={styles.heroTitle}>Welcome to MyRide Drive</Text>
-          <Text style={styles.heroSub}>{submitted ? "Your application is being reviewed (usually within 48 hours). We'll SMS you when you're approved." : 'Finish your application in about 10 minutes. Weekly payouts to your bank.'}</Text>
+          <Text style={styles.heroSub}>{APPLICATION_STATUS[status ?? ''] ?? 'Finish your application in about 10 minutes. Weekly payouts to your bank.'}</Text>
         </Hero>
         <View style={{ padding: 16, marginTop: -24, gap: 10 }}>
           <Card raised>{steps.map(([icon, title, subtitle]) => <ListRow key={title} icon={icon} title={title} subtitle={subtitle} right={submitted ? <Icon name="checkmark-circle" size={20} color={t.ok} /> : undefined} />)}</Card>
-          {!submitted && <Button title={dash.application ? 'Continue application' : 'Start application'} icon="arrow-forward" onPress={() => router.push('/drive/apply')} />}
+          {!submitted && <Button title={status === 'rejected' ? 'See why' : status === 'resubmit' ? 'Update application' : dash.application ? 'Continue application' : 'Start application'} icon="arrow-forward" onPress={() => router.push('/drive/apply')} />}
           <Button title="Check status" icon="refresh" kind="soft" onPress={load} />
           <Button title="Sign out" kind="ghost" onPress={signOut} />
         </View>
@@ -336,6 +361,7 @@ function OfferCard({ o, more, onAccept, onExpire }: { o: DriverTrip; more: numbe
 }
 
 const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   top: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   earn: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 99 },
   status: { width: 10, height: 10, borderRadius: 5 },

@@ -1,11 +1,15 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppMap, type MapHandle, type MapMarker } from '@/components/AppMap';
-import { Avatar, BackHeader, Button, Card, Chip, Icon, Pill, Plate, Pulse, RoundButton, Row, Sheet, Steps, Txt, type IconName } from '@/components/ui';
-import { api, apiUrlFor, rs, type Point, type Quote, type Trip } from '@/lib/api';
+import { MapPicker } from '@/components/MapPicker';
+import { PlaceSearch, type Kind, type Place, type Shortcut } from '@/components/PlaceSearch';
+import { QuoteRow } from '@/components/QuoteRow';
+import { TripPanel } from '@/components/TripPanel';
+import { Button, Chip, Icon, RoundButton, Row, Sheet, Txt, type IconName } from '@/components/ui';
+import { api, rs, type Point, type Quote, type Trip } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { call, POLICE } from '@/lib/config';
 import { RADIUS, shadow, useTheme, vehicleEmoji } from '@/lib/theme';
@@ -14,29 +18,37 @@ import { useEvents } from '@/lib/useEvents';
 import { usePolling } from '@/lib/usePolling';
 import { useSavedPlaces, type SavedKey } from '@/lib/useSavedPlaces';
 
-type Kind = 'ride' | 'delivery' | 'logistics';
-type Place = { id: string; name: string; lat: number; lng: number; category?: string };
 type QuoteResp = { route: { km: number; min: number; geometry: [number, number][] }; quotes: Quote[]; pickupWard: string | null; dropWard: string | null; recommend: string | null; promoError: string | null };
 
 const ACTIVE = ['scheduled', 'searching', 'accepted', 'arrived', 'in_progress'];
 const KINDS: Record<Kind, [string, IconName]> = { ride: ['Ride', 'car-sport'], delivery: ['Parcel', 'cube'], logistics: ['Logistics', 'bus'] };
 const PAYMENTS: Record<'cash' | 'esewa' | 'khalti', [string, IconName]> = { cash: ['Cash', 'cash-outline'], esewa: ['eSewa', 'wallet-outline'], khalti: ['Khalti', 'card-outline'] };
-const PLACE_ICON: Record<string, IconName> = { ward: 'home-outline', intercity: 'trail-sign-outline', transport: 'airplane-outline', hospital: 'medkit-outline', tourist: 'camera-outline', commercial: 'storefront-outline' };
 const QUICK: Record<string, [string, IconName]> = {
   'pokhara-intl-airport': ['Airport', 'airplane-outline'], 'tourist-bus-park': ['Bus Park', 'bus-outline'], mahendrapul: ['Mahendrapul', 'storefront-outline'],
   lakeside: ['Lakeside', 'boat-outline'], 'prithvi-chowk': ['Prithvi Chowk', 'git-network-outline'], chipledhunga: ['Chipledhunga', 'cart-outline'],
 };
-const STATUS: Record<string, string> = {
-  searching: 'Finding your rider…', accepted: 'Your rider is on the way', arrived: 'Your rider has arrived', in_progress: 'Enjoy your ride',
-  completed: 'You have arrived', cancelled: 'Trip cancelled', no_driver: 'No riders available right now', scheduled: 'Scheduled',
-};
-const STEP_OF: Record<string, number> = { searching: 0, accepted: 1, arrived: 2, in_progress: 3 };
 const SAVED: Record<SavedKey, [string, IconName]> = { home: ['Home', 'home'], work: ['Work', 'briefcase'] };
 const SEARCH_TITLE = { pickup: 'Pickup point', drop: 'Where to?', home: 'Set your Home', work: 'Set your Work' };
 const short = (s?: string) => (s ?? 'Drop').replace(/ \(.*\)$/, '').slice(0, 24); // "Talchowk (Lekhnath)" → "Talchowk"
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
+const asPoint = (p: Place): Point => ({ lat: p.lat, lng: p.lng, label: p.name });
+const km = (a: Point, b: Point) => { // haversine
+  const r = (x: number) => (x * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+};
+const clock = (ms: number) => {
+  const d = new Date(ms), today = new Date().toDateString() === d.toDateString();
+  return `${today ? 'Today' : 'Tomorrow'} ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+};
+/** Schedule choices (the server takes 15 minutes to 7 days ahead), rounded up to the next 5 minutes. */
+const scheduleOptions = () => {
+  const at = (mins: number) => Math.ceil((Date.now() + mins * 60000) / 300000) * 300000;
+  const tomorrow = (h: number) => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(h, 0, 0, 0); return d.getTime(); };
+  return [at(30), at(60), at(120), tomorrow(7), tomorrow(9)];
+};
 
-export default function RiderHome() {
+export default function CustomerHome() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { profile, refresh } = useAuth();
@@ -47,42 +59,64 @@ export default function RiderHome() {
   const [pickupChoice, setPickup] = useState<Point | null>(null);
   const [drop, setDrop] = useState<Point | null>(null);
   const [searching, setSearching] = useState<null | 'pickup' | 'drop' | SavedKey>(null);
+  const [picking, setPicking] = useState<null | 'pickup' | 'drop' | SavedKey>(null); // "set on map"
+  const [hereAddr, setHereAddr] = useState<{ label: string; at: Point } | null>(null);
   const { places: saved, save } = useSavedPlaces();
   const [promo, setPromo] = useState(''); // typed code
   const [promoApplied, setPromoApplied] = useState<string | null>(null);
   const [promoOpen, setPromoOpen] = useState(false);
-  const [query, setQuery] = useState('');
   const [places, setPlaces] = useState<Place[]>([]);
+  const [placesFailed, setPlacesFailed] = useState(false);
   const [quote, setQuote] = useState<QuoteResp | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [payment, setPayment] = useState<keyof typeof PAYMENTS>('cash');
   const [weight, setWeight] = useState('2');
   const [receiver, setReceiver] = useState({ name: '', phone: '' });
   const [trip, setTrip] = useState<Trip | null>(null);
-  const [nearby, setNearby] = useState<{ lat: number; lng: number; type: string }[]>([]);
+  const [recent, setRecent] = useState<Point[]>([]);
+  const [city, setCity] = useState<{ centre: Point; maxRadiusKm: number } | null>(null);
+  const [when, setWhen] = useState<number | null>(null); // scheduled pickup time; null = now
+  const [whenOpen, setWhenOpen] = useState(false);
+  const [nearby, setNearby] = useState<{ lat: number; lng: number; type: string; heading?: number | null }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [sheetH, setSheetH] = useState(300);
 
+  // Outside Pokhara (e.g. a phone abroad), GPS can't be the pickup: the server only accepts pickups in the city.
+  const outside = !!fix && !!city && km(fix, city.centre) > city.maxRadiusKm;
   // Default pickup = the user's current location (until they pick another place).
-  const here = useMemo(() => (fix ? { lat: fix.lat, lng: fix.lng, label: 'Current location' } : null), [fix]);
+  const here = useMemo(() => (fix && !outside ? { lat: fix.lat, lng: fix.lng, label: hereAddr?.label ?? 'Current location' } : null), [fix, outside, hereAddr]);
   const pickup = pickupChoice ?? here;
 
-  // Start the map on the user's current location (first GPS fix).
+  // Name the GPS position ("Near Hallan Chowk") instead of "Current location"; look it up again after moving 60 m.
+  useEffect(() => {
+    if (!fix || outside || (hereAddr && km(hereAddr.at, fix) < 0.06)) return;
+    const at = { lat: fix.lat, lng: fix.lng };
+    api<{ label: string }>('GET', `/api/places/reverse?lat=${at.lat}&lng=${at.lng}`).then((a) => setHereAddr({ label: a.label, at })).catch(() => {});
+  }, [fix, outside, hereAddr]);
+
+  // Start the map on the user's current location (first GPS fix), or on Pokhara when they're outside it.
   const centred = useRef(false);
   useEffect(() => {
-    if (!fix || centred.current) return;
+    if (!fix || !city || centred.current) return;
     centred.current = true;
-    map.current?.flyTo(fix, { zoom: 16 });
-  }, [fix]);
+    map.current?.flyTo(outside ? city.centre : fix, { zoom: outside ? 13 : 16 });
+  }, [fix, city, outside]);
 
-  // Places (landmarks, 33 wards, intercity lanes) and any trip still in progress.
-  useEffect(() => {
-    Promise.all([api<Place[]>('GET', '/api/places'), api<{ logistics: { destinations: Place[] } }>('GET', '/api/config')])
-      .then(([p, c]) => setPlaces([...p, ...c.logistics.destinations.map((d) => ({ ...d, category: 'intercity' }))]))
-      .catch(() => {});
-    api<Trip[]>('GET', '/api/trips').then((l) => setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? null)).catch(() => {});
+  // Places (landmarks, 33 wards, intercity lanes), the city, any trip still in progress and recent destinations.
+  const loadPlaces = useCallback(() => {
+    Promise.all([api<Place[]>('GET', '/api/places'), api<{ city: { centre: Point; maxRadiusKm: number }; logistics: { destinations: Place[] } }>('GET', '/api/config')])
+      .then(([p, c]) => { setPlaces([...p, ...c.logistics.destinations.map((d) => ({ ...d, category: 'intercity' }))]); setCity(c.city); setPlacesFailed(false); })
+      .catch(() => setPlacesFailed(true));
   }, []);
+  const loadTrips = useCallback(() => {
+    api<Trip[]>('GET', '/api/trips').then((l) => {
+      setTrip(l.find((x) => ACTIVE.includes(x.status)) ?? null);
+      const seen = new Set<string>();
+      setRecent(l.filter((x) => x.status === 'completed' && x.drop.label && !seen.has(x.drop.label) && seen.add(x.drop.label)).slice(0, 3).map((x) => x.drop));
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { loadPlaces(); loadTrips(); }, [loadPlaces, loadTrips]);
 
   // Live trip updates arrive over SSE; the slow poll only covers a dropped connection.
   const live = !!trip && ACTIVE.includes(trip.status);
@@ -90,10 +124,13 @@ export default function RiderHome() {
     if (next.status !== trip?.status) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTrip(next);
   };
+  // Server events say role 'rider' for the customer (legacy server naming, see mobile/AGENTS.md).
   useEvents((e) => { if (e.type === 'trip' && e.role === 'rider' && e.trip.id === trip?.id) update(e.trip); }, live);
   usePolling(async () => update(await api<Trip>('GET', `/api/trips/${trip!.id}`)), 15000, live);
 
-  usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${pickup!.lat}&lng=${pickup!.lng}`)), 8000, !trip && !!pickup);
+  // Vehicles around the pickup (or around Pokhara's centre while the user is outside the city).
+  const around = pickup ?? (outside ? city!.centre : null);
+  usePolling(async () => setNearby(await api('GET', `/api/nearby?lat=${around!.lat}&lng=${around!.lng}`)), 8000, !trip && !!around);
 
   const getQuote = useCallback(async (p: Point, d: Point, k: Kind, promoCode: string | null = promoApplied) => {
     setErr(''); setBusy(true);
@@ -113,21 +150,14 @@ export default function RiderHome() {
     if (routeCoords) map.current?.fit(routeCoords, { top: insets.top + 80, right: 48, bottom: sheetH + 24, left: 48 });
   }, [routeCoords, sheetH, insets.top]);
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return places
-      .filter((p) => (kind === 'logistics' || p.category !== 'intercity') && (q ? p.name.toLowerCase().includes(q) : p.category !== 'ward'))
-      .slice(0, 40);
-  }, [places, query, kind]);
   const quick = useMemo(() => places.filter((p) => p.id in QUICK), [places]);
 
   function choose(p: Point | null, field = searching) { // null = back to current location
-    if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: SAVED[field][0] }); setSearching(null); setQuery(''); return; }
+    if (field === 'home' || field === 'work') { if (p) save(field, { ...p, label: SAVED[field][0] }); setSearching(null); return; }
     const nextPickup = field === 'pickup' ? p ?? here : pickup;
     const nextDrop = field === 'drop' ? p : drop;
     if (field === 'pickup') setPickup(p); else setDrop(p);
     setSearching(null);
-    setQuery('');
     if (nextPickup && nextDrop) getQuote(nextPickup, nextDrop, kind);
   }
   function chooseKind(k: Kind) {
@@ -135,72 +165,85 @@ export default function RiderHome() {
     if (pickup && drop) getQuote(pickup, drop, k);
   }
   const clearDrop = () => { setDrop(null); setQuote(null); setErr(''); if (fix) map.current?.flyTo(fix, { zoom: 16 }); };
+  const closeSearch = useCallback(() => setSearching(null), []);
 
   async function book() {
     if (!pickup || !drop || !sel) return;
     setErr(''); setBusy(true);
     try {
       const goods = kind === 'ride' ? {} : { parcel: { weightKg: +weight || 1 }, recipient: receiver };
-      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, ...goods }));
+      const scheduledAt = when ? new Date(when).toISOString() : undefined;
+      setTrip(await api<Trip>('POST', '/api/trips', { service: sel, pickup, drop, payment, promoCode: promoApplied ?? undefined, scheduledAt, ...goods }));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      setQuote(null);
+      setQuote(null); setWhen(null); setWhenOpen(false);
     } catch (e) { setErr((e as Error).message); }
     setBusy(false);
   }
 
   const tripAction = async (path: string, body: object) => {
+    setErr('');
     try { setTrip(await api<Trip>('POST', `/api/trips/${trip!.id}/${path}`, body)); } catch (e) { setErr((e as Error).message); }
   };
-  const rate = async (stars: number) => { await api('POST', `/api/trips/${trip!.id}/rate`, { stars }).catch(() => {}); setTrip({ ...trip!, riderRating: { stars } }); };
-  const sos = () => { api('POST', `/api/trips/${trip!.id}/sos`, { loc: fix }).catch(() => {}); call(POLICE); };
-  const reset = () => { setTrip(null); setDrop(null); setQuote(null); setPromoApplied(null); refresh(); };
+  const rate = async (stars: number) => {
+    setErr('');
+    try { await api('POST', `/api/trips/${trip!.id}/rate`, { stars }); setTrip({ ...trip!, riderRating: { stars } }); } catch (e) { setErr(`Rating not saved: ${(e as Error).message}`); }
+  };
+  const sos = () => { api('POST', `/api/trips/${trip!.id}/sos`, { loc: fix }).catch(() => {}); call(POLICE); }; // always call the police, even if MyRide is unreachable
+  const reset = () => { setTrip(null); setDrop(null); setQuote(null); setPromoApplied(null); setErr(''); refresh(); loadTrips(); };
   const applyPromo = () => { const code = promo.trim().toUpperCase(); if (!code || !pickup || !drop) return; setPromoApplied(code); setPromoOpen(false); getQuote(pickup, drop, kind, code); };
 
   const selected = quote?.quotes.find((q) => q.service === sel);
   const pk = trip?.pickup ?? pickup, dp = trip?.drop ?? drop;
   const markers: MapMarker[] = [
-    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, emoji: vehicleEmoji(c.type), size: 20 }))),
-    ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : 'Pickup' }] : []),
-    ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: [short(dp.label), quote && !trip ? `${Math.round(quote.route.min)} min` : ''].filter(Boolean).join(' · ') }] : []),
-    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
+    ...(trip ? [] : nearby.map((c, i) => ({ key: `n${i}`, at: c, kind: 'vehicle' as const, vehicle: c.type, heading: c.heading, emoji: vehicleEmoji(c.type), size: 20 }))),
+    ...(pk && (drop || trip) ? [{ key: 'pickup', at: pk, kind: 'pickup' as const, label: trip?.status === 'arrived' ? 'Your rider is here' : short(pk.label === 'Current location' ? 'Pickup' : pk.label) }] : []),
+    ...(dp ? [{ key: 'drop', at: dp, kind: 'drop' as const, label: short(dp.label), eta: quote && !trip ? `${Math.round(quote.route.min)} min` : undefined }] : []),
+    ...(trip?.driver?.loc ? [{ key: 'driver', at: trip.driver.loc, kind: 'vehicle' as const, vehicle: trip.driver.vehicle.type, emoji: vehicleEmoji(trip.driver.vehicle.type), size: 22 }] : []),
   ];
   const input = [styles.small, { borderColor: t.line, color: t.ink, backgroundColor: t.bg }];
 
+  // ---------- set on map ----------
+  if (picking) {
+    const current = picking === 'pickup' ? pickup : picking === 'drop' ? drop : saved[picking];
+    const start = current ?? here ?? city?.centre ?? { lat: 28.2096, lng: 83.9856 };
+    const confirm = picking === 'pickup' ? 'Confirm pickup' : picking === 'drop' ? 'Confirm destination' : `Save as ${SAVED[picking][0]}`;
+    return <MapPicker title={SEARCH_TITLE[picking]} start={start} user={fix} inCityOnly={picking === 'pickup'} confirmLabel={confirm} onConfirm={(p) => { const f = picking; setPicking(null); choose(p, f); }} onClose={() => setPicking(null)} />;
+  }
+
   // ---------- search screen ----------
   if (searching) {
+    const shortcuts: Shortcut[] =
+      searching === 'pickup' ? (here ? [{ key: 'here', icon: 'locate', title: 'Use current location', subtitle: 'GPS', onPress: () => choose(null) }] : [])
+        : searching === 'drop' ? [
+          ...(Object.keys(SAVED) as SavedKey[]).flatMap((k): Shortcut[] => (saved[k] ? [{ key: k, icon: SAVED[k][1], title: SAVED[k][0], subtitle: 'Saved place', onPress: () => choose(saved[k]!) }] : [])),
+          ...recent.map((p): Shortcut => ({ key: `r${p.label}`, icon: 'time-outline', title: p.label!, subtitle: 'Recent', onPress: () => choose(p) })),
+        ]
+          : here ? [{ key: 'here', icon: 'locate', title: 'Use my current location', subtitle: `Save as ${SAVED[searching][0]}`, onPress: () => choose(here) }] : [];
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-        <View style={{ paddingHorizontal: 16, gap: 10 }}>
-          <BackHeader title={SEARCH_TITLE[searching]} />
-          <View style={[styles.search, shadow(3), { backgroundColor: t.card }]}>
-            <Icon name="search" size={20} color={t.muted} />
-            <TextInput autoFocus value={query} onChangeText={setQuery} placeholder="Landmark, ward (e.g. Ward 27) or city" placeholderTextColor={t.muted} style={{ flex: 1, fontSize: 16, color: t.ink, paddingVertical: 14 }} />
-            {!!query && <Pressable onPress={() => setQuery('')} hitSlop={10}><Icon name="close-circle" size={20} color={t.muted} /></Pressable>}
-          </View>
-          {searching === 'pickup' && here && <PlaceRow icon="locate" title="Use current location" subtitle="GPS" onPress={() => choose(null)} highlight />}
-          {(searching === 'home' || searching === 'work') && here && <PlaceRow icon="locate" title="Use my current location" subtitle={`Save as ${SAVED[searching][0]}`} onPress={() => choose(here)} highlight />}
-          {searching === 'drop' && (Object.keys(SAVED) as SavedKey[]).map((k) => saved[k] && <PlaceRow key={k} icon={SAVED[k][1]} title={SAVED[k][0]} subtitle="Saved place" onPress={() => choose(saved[k]!)} highlight />)}
-        </View>
-        <FlatList
-          data={results}
-          keyExtractor={(p) => p.id}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
-          renderItem={({ item }) => (
-            <PlaceRow icon={PLACE_ICON[item.category ?? ''] ?? 'location-outline'} title={item.name} subtitle={item.category === 'intercity' ? 'Intercity · logistics only' : item.category} onPress={() => choose({ lat: item.lat, lng: item.lng, label: item.name })} />
-          )}
-        />
-      </SafeAreaView>
+      <PlaceSearch
+        title={SEARCH_TITLE[searching]} places={places} kind={kind} near={pickup ?? (outside ? city?.centre ?? null : here)} shortcuts={shortcuts}
+        onPick={(p) => choose(asPoint(p))} onMap={() => { setPicking(searching); setSearching(null); }}
+        onClose={closeSearch} failed={placesFailed} onRetry={loadPlaces}
+      />
     );
   }
 
+  const schedulePicker = (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 6 }}>
+      <Chip label="Now" icon="flash-outline" active={!when} onPress={() => { setWhen(null); setWhenOpen(false); }} />
+      {scheduleOptions().map((ms) => <Chip key={ms} label={clock(ms)} active={when === ms} onPress={() => { setWhen(ms); setWhenOpen(false); }} />)}
+    </ScrollView>
+  );
   const first = profile?.name?.split(' ')[0];
   return (
     <View style={{ flex: 1 }}>
       <AppMap ref={map} user={fix} padding={{ bottom: sheetH }} markers={markers} lines={routeCoords ? [{ coords: routeCoords, color: t.ink, width: 5 }] : []} />
 
       <View style={[styles.top, { top: insets.top + 8 }]}>
-        <RoundButton icon="person" label="Account" onPress={() => router.push('/customer/account')} />
+        <View>
+          <RoundButton icon="person" label="Account" onPress={() => router.push('/customer/account')} />
+          {profile?.membership.active && <View style={[styles.plus, { backgroundColor: t.accent, borderColor: t.card }]}><Icon name="star" size={10} color="#fff" /></View>}
+        </View>
         {!trip && !drop && (
           <View style={[styles.hello, shadow(5), { backgroundColor: t.card }]}>
             <Text style={{ color: t.muted, fontSize: 12 }}>{greeting()}</Text>
@@ -208,8 +251,6 @@ export default function RiderHome() {
           </View>
         )}
         <View style={{ flex: 1 }} />
-        {profile?.membership.active && <Pill icon="star" text="PLUS" color={t.accent} />}
-        {profile?.firstRideFree && !trip && <Pill icon="gift" text="1st ride free" color={t.ok} />}
         {!trip && <RoundButton icon="receipt-outline" label="Your trips" onPress={() => router.push('/customer/activity')} />}
       </View>
 
@@ -225,37 +266,63 @@ export default function RiderHome() {
                 <Button title="Apply" kind="soft" onPress={applyPromo} style={{ minHeight: 44, paddingVertical: 10 }} />
               </Row>
             )}
+            {whenOpen && schedulePicker}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <Chip label={when ? clock(when) : 'Now'} icon="time-outline" active={!!when} onPress={() => setWhenOpen(!whenOpen)} />
               {(Object.keys(PAYMENTS) as (keyof typeof PAYMENTS)[]).map((p) => <Chip key={p} label={PAYMENTS[p][0]} icon={PAYMENTS[p][1]} active={payment === p} onPress={() => setPayment(p)} />)}
               <Chip label={promoApplied ?? 'Promo'} icon={promoApplied ? 'checkmark-circle' : 'pricetag-outline'} active={!!promoApplied} onPress={() => setPromoOpen(!promoOpen)} />
             </ScrollView>
-            <Button title={`Book ${selected.label.replace('MyRide ', '')} · ${selected.total === 0 ? 'FREE' : rs(selected.total)}`} onPress={book} loading={busy} kind="dark" />
+            <Button title={`${when ? 'Schedule' : 'Book'} ${selected.label.replace('MyRide ', '')} · ${selected.total === 0 ? 'FREE' : rs(selected.total)}`} onPress={book} loading={busy} kind="dark" />
           </>
         ) : undefined}
       >
         {trip ? (
-          <TripPanel trip={trip} onCancel={() => tripAction('cancel', { reason: 'rider_cancelled' })} onRate={rate} onSos={sos} onDone={reset} />
+          <TripPanel trip={trip} err={err} onCancel={() => tripAction('cancel', { reason: 'rider_cancelled' })} onRate={rate} onSos={sos} onDone={reset} />
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Row style={{ marginBottom: 12 }}>
               {(Object.keys(KINDS) as Kind[]).map((k) => <Chip key={k} label={KINDS[k][0]} icon={KINDS[k][1]} active={kind === k} onPress={() => chooseKind(k)} />)}
             </Row>
 
+            {outside && !pickupChoice && (
+              <View style={[styles.banner, { backgroundColor: t.accentSoft }]}>
+                <Icon name="location-outline" size={18} color={t.accent} />
+                <Txt kind="small" style={{ flex: 1, color: t.ink }}>{"You're outside Pokhara. MyRide works in Pokhara for now: choose a pickup point there to book."}</Txt>
+              </View>
+            )}
+            {profile?.firstRideFree && !outside && (
+              <View style={[styles.banner, { backgroundColor: t.okSoft }]}>
+                <Icon name="gift" size={18} color={t.ok} />
+                <Txt kind="small" style={{ flex: 1, color: t.ink }}>Your first ride is free (up to Rs 100)</Txt>
+              </View>
+            )}
             {!drop ? (
               <>
-                <Pressable onPress={() => setSearching('drop')} style={[styles.whereTo, { backgroundColor: t.chip }]} accessibilityRole="search">
-                  <Icon name="search" size={22} />
-                  <Text style={{ flex: 1, fontSize: 19, fontWeight: '800', color: t.ink }}>Where to?</Text>
-                  <View style={[styles.now, { backgroundColor: t.card }]}><Icon name="time-outline" size={15} /><Text style={{ fontWeight: '700', color: t.ink, fontSize: 13 }}>Now</Text></View>
-                </Pressable>
+                <View style={[styles.whereTo, { backgroundColor: t.chip }]}>
+                  <Pressable onPress={() => setSearching('drop')} style={styles.whereToTap} accessibilityRole="search">
+                    <Icon name="search" size={22} />
+                    <Text style={{ flex: 1, fontSize: 19, fontWeight: '800', color: t.ink }}>Where to?</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setWhenOpen(!whenOpen)} style={[styles.now, { backgroundColor: t.card }]} accessibilityLabel="Pickup time">
+                    <Icon name="time-outline" size={15} /><Text style={{ fontWeight: '700', color: t.ink, fontSize: 13 }}>{when ? clock(when) : 'Now'}</Text><Icon name="chevron-down" size={13} color={t.muted} />
+                  </Pressable>
+                </View>
+                {whenOpen && schedulePicker}
                 <Pressable onPress={() => setSearching('pickup')} style={styles.from}>
-                  <View style={[styles.dot, { backgroundColor: t.brand }]} />
-                  <Txt kind="muted" numberOfLines={1} style={{ flex: 1 }}>Pickup: <Text style={{ color: t.ink, fontWeight: '700' }}>{pickup?.label ?? 'Locating you…'}</Text></Txt>
+                  <View style={[styles.dot, { backgroundColor: t.ink }]} />
+                  <Txt kind="muted" numberOfLines={1} style={{ flex: 1 }}>Pickup: <Text style={{ color: t.ink, fontWeight: '700' }}>{pickup?.label ?? (outside ? 'Choose a pickup in Pokhara' : 'Locating you…')}</Text></Txt>
                   <Icon name="pencil" size={15} color={t.muted} />
                 </Pressable>
+                {recent.slice(0, 2).map((p) => (
+                  <Pressable key={p.label} onPress={() => choose(p, 'drop')} style={[styles.recent, { borderColor: t.line }]}>
+                    <View style={[styles.recentIcon, { backgroundColor: t.chip }]}><Icon name="time-outline" size={18} /></View>
+                    <View style={{ flex: 1 }}><Txt style={{ fontWeight: '700' }} numberOfLines={1}>{p.label}</Txt><Txt kind="small">Recent</Txt></View>
+                    <Icon name="chevron-forward" size={18} color={t.muted} />
+                  </Pressable>
+                ))}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
                   {(Object.keys(SAVED) as SavedKey[]).map((k) => <Chip key={k} label={saved[k] ? SAVED[k][0] : `Set ${SAVED[k][0]}`} icon={SAVED[k][1]} active={false} onPress={() => (saved[k] ? choose(saved[k]!, 'drop') : setSearching(k))} onLongPress={() => setSearching(k)} />)}
-                  {quick.map((p) => <Chip key={p.id} label={QUICK[p.id][0]} icon={QUICK[p.id][1]} onPress={() => choose({ lat: p.lat, lng: p.lng, label: p.name }, 'drop')} />)}
+                  {quick.map((p) => <Chip key={p.id} label={QUICK[p.id][0]} icon={QUICK[p.id][1]} onPress={() => choose(asPoint(p), 'drop')} />)}
                 </ScrollView>
                 <Pressable onPress={() => router.push('/customer/fares')} style={[styles.from, { marginTop: 4 }]}>
                   <Icon name="shield-checkmark" size={16} color={t.ok} />
@@ -300,152 +367,18 @@ export default function RiderHome() {
   );
 }
 
-function PlaceRow({ icon, title, subtitle, onPress, highlight }: { icon: IconName; title: string; subtitle?: string; onPress: () => void; highlight?: boolean }) {
-  const t = useTheme();
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.result, { borderColor: t.line, opacity: pressed ? 0.6 : 1 }]}>
-      <View style={[styles.placeIcon, { backgroundColor: highlight ? t.brand : t.chip }]}><Icon name={icon} size={18} color={highlight ? '#fff' : t.ink} /></View>
-      <View style={{ flex: 1 }}><Txt style={{ fontWeight: '600' }} numberOfLines={1}>{title}</Txt>{!!subtitle && <Txt kind="small" style={{ textTransform: 'capitalize' }}>{subtitle}</Txt>}</View>
-    </Pressable>
-  );
-}
-
-function QuoteRow({ q, selected, recommended, onPress }: { q: Quote; selected: boolean; recommended: boolean; onPress: () => void }) {
-  const t = useTheme();
-  if (q.unavailable) return <View style={[styles.quote, { opacity: 0.45 }]}><Text style={styles.qIcon}>{vehicleEmoji(q.service)}</Text><View style={{ flex: 1 }}><Txt style={{ fontWeight: '700' }}>{q.label}</Txt><Txt kind="small">{q.unavailable}</Txt></View></View>;
-  const cheapest = q.competitors.reduce<Quote['competitors'][number] | null>((a, c) => (!a || c.estimate < a.estimate ? c : a), null);
-  const save = cheapest && cheapest.estimate > q.total ? cheapest.estimate - q.total : 0;
-  return (
-    <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected }} style={[styles.quote, { backgroundColor: selected ? t.brandSoft : 'transparent', borderColor: selected ? t.brand : 'transparent' }]}>
-      <Text style={styles.qIcon}>{vehicleEmoji(q.service)}</Text>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Txt style={{ fontWeight: '800' }} numberOfLines={1}>{q.label.replace('MyRide ', '')}</Txt>
-        <Txt kind="small">{q.min} min · {q.available ? `${q.available} nearby` : 'few nearby'}{q.intercity ? ' · intercity' : ''}</Txt>
-        <Row style={{ gap: 6 }}>
-          {recommended && <Pill text="Best for hills" color={t.accent} tint={t.accentSoft} icon="trending-up" />}
-          {save > 0 && <Pill text={`Save ${rs(save)} vs ${cheapest!.name}`} color={t.ok} tint={t.okSoft} />}
-        </Row>
-      </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Txt kind="price" style={{ color: q.total === 0 ? t.ok : t.ink }}>{q.total === 0 ? 'FREE' : rs(q.total)}</Txt>
-        {q.split.promoCost > 0 && <Text style={{ color: t.muted, textDecorationLine: 'line-through', fontSize: 12 }}>{rs(q.gross)}</Text>}
-      </View>
-    </Pressable>
-  );
-}
-
-function TripPanel({ trip, onCancel, onRate, onSos, onDone }: { trip: Trip; onCancel: () => void; onRate: (s: number) => void; onSos: () => void; onDone: () => void }) {
-  const t = useTheme();
-  const d = trip.driver;
-  const is = (...s: string[]) => s.includes(trip.status);
-  const live = is('accepted', 'arrived', 'in_progress');
-  const share = () => Share.share({ message: `Track my MyRide trip live: ${apiUrlFor(`/track.html?t=${trip.shareToken}`)}` });
-  return (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <View style={{ flex: 1 }}>
-          <Txt kind="h1">{STATUS[trip.status] ?? trip.status}</Txt>
-          <Txt kind="muted" numberOfLines={1}>{trip.pickup.label} → {trip.drop.label} · {trip.route.km.toFixed(1)} km</Txt>
-        </View>
-        {is('searching') && <Pulse size={52} color={t.brand}><View style={[styles.pulseCore, { backgroundColor: t.brand }]}><Text style={{ fontSize: 22 }}>{vehicleEmoji(trip.service)}</Text></View></Pulse>}
-      </Row>
-      {trip.status in STEP_OF && <Steps steps={['Booked', 'Coming', 'Pickup', 'On trip']} at={STEP_OF[trip.status]} />}
-      {is('searching') && <Txt kind="small">Offering your trip to the nearest riders…</Txt>}
-
-      {d && (
-        <Card raised style={{ marginTop: 8 }}>
-          <Row style={{ gap: 12 }}>
-            <Avatar name={d.name} size={52} />
-            <View style={{ flex: 1, gap: 3 }}>
-              <Row style={{ gap: 6 }}><Txt style={{ fontWeight: '800' }}>{d.name}</Txt><Icon name="star" size={13} color={t.accent} /><Txt kind="small">{d.rating}</Txt></Row>
-              <Txt kind="small">{d.vehicle.model}{d.fleet ? ' · MyRide fleet' : ''}</Txt>
-              <Plate text={d.vehicle.plate} />
-            </View>
-            <Text style={{ fontSize: 40 }}>{vehicleEmoji(d.vehicle.type)}</Text>
-          </Row>
-        </Card>
-      )}
-
-      {is('accepted', 'arrived') && <Code label="Tell your rider this PIN at pickup" code={trip.pin} />}
-      {trip.kind === 'delivery' && trip.deliveryOtp && live && <Code label={`Delivery code (also sent to ${trip.recipient?.name} by SMS)`} code={trip.deliveryOtp} />}
-
-      {live && d && (
-        <Row style={{ marginTop: 10 }}>
-          <Action icon="call" label="Call" onPress={() => call(d.phone)} />
-          <Action icon="share-social" label="Share trip" onPress={share} />
-          <Action icon="warning" label="SOS" onPress={onSos} danger />
-        </Row>
-      )}
-
-      {!is('completed') && (
-        <Row style={{ justifyContent: 'space-between', marginTop: 12 }}>
-          <Row><Icon name={trip.payment.method === 'cash' ? 'cash-outline' : 'wallet-outline'} size={18} color={t.muted} /><Txt kind="muted" style={{ textTransform: 'capitalize' }}>{trip.payment.method}</Txt></Row>
-          <Txt kind="price" style={{ color: trip.fare === 0 ? t.ok : t.ink }}>{trip.fare === 0 ? 'FREE' : rs(trip.fare)}</Txt>
-        </Row>
-      )}
-
-      {is('completed') && (
-        <Card style={{ marginTop: 10, backgroundColor: t.bg }}>
-          {trip.quote.lines.map((l, i) => <Row key={i} style={{ justifyContent: 'space-between', marginVertical: 2 }}><Txt kind="muted">{l.label}</Txt><Txt kind="muted">{l.amount < 0 ? '−' : ''}{rs(Math.abs(l.amount))}</Txt></Row>)}
-          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginVertical: 8 }} />
-          <Row style={{ justifyContent: 'space-between' }}><Txt style={{ fontWeight: '800' }}>Total · {trip.payment.method}</Txt><Txt kind="price" style={{ color: trip.fare === 0 ? t.ok : t.ink }}>{trip.fare === 0 ? 'FREE' : rs(trip.fare)}</Txt></Row>
-        </Card>
-      )}
-      {is('completed') && (
-        <View style={{ alignItems: 'center', marginTop: 8 }}>
-          <Txt kind="muted">{trip.riderRating ? 'Thanks for rating!' : `How was your trip with ${d?.name.split(' ')[0] ?? 'your rider'}?`}</Txt>
-          <Row style={{ marginVertical: 4, gap: 6 }}>
-            {[1, 2, 3, 4, 5].map((s) => (
-              <Pressable key={s} disabled={!!trip.riderRating} onPress={() => onRate(s)} accessibilityLabel={`${s} stars`} hitSlop={4}>
-                <Icon name={(trip.riderRating?.stars ?? 0) >= s ? 'star' : 'star-outline'} size={36} color={(trip.riderRating?.stars ?? 0) >= s ? t.accent : t.line} />
-              </Pressable>
-            ))}
-          </Row>
-        </View>
-      )}
-
-      {is('searching', 'accepted', 'arrived', 'scheduled') && <Button title="Cancel trip" kind="ghost" onPress={onCancel} style={{ marginTop: 12 }} />}
-      {is('completed', 'cancelled', 'no_driver') && <Button title={is('completed') ? 'Done' : 'Book again'} onPress={onDone} style={{ marginTop: 10 }} />}
-    </ScrollView>
-  );
-}
-
-function Action({ icon, label, onPress, danger }: { icon: IconName; label: string; onPress: () => void; danger?: boolean }) {
-  const t = useTheme();
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.action, { backgroundColor: danger ? t.dangerSoft : t.chip, opacity: pressed ? 0.7 : 1 }]}>
-      <Icon name={icon} size={20} color={danger ? t.danger : t.ink} /><Text style={{ fontSize: 12, fontWeight: '700', color: danger ? t.danger : t.ink }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function Code({ label, code }: { label: string; code: string }) {
-  const t = useTheme();
-  return (
-    <View style={{ marginTop: 12, gap: 8 }}>
-      <Txt kind="small">{label}</Txt>
-      <Row style={{ gap: 8 }}>
-        {code.split('').map((c, i) => <View key={i} style={[styles.codeBox, { backgroundColor: t.brandSoft }]}><Text style={{ fontSize: 28, fontWeight: '900', color: t.brand }}>{c}</Text></View>)}
-      </Row>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   top: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
   hello: { borderRadius: RADIUS.pill, paddingHorizontal: 16, paddingVertical: 7, maxWidth: '62%' },
-  whereTo: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 15 },
-  now: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.pill, paddingHorizontal: 10, paddingVertical: 6 },
+  whereTo: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingRight: 10 },
+  whereToTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingVertical: 15 },
+  now: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.pill, paddingHorizontal: 10, paddingVertical: 7 },
+  plus: { position: 'absolute', right: -2, top: -2, width: 18, height: 18, borderRadius: 9, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  recent: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  recentIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   from: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 4 },
   route: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: RADIUS.md, padding: 14 },
   dot: { width: 10, height: 10, borderRadius: 5 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 14 },
-  result: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
-  placeIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   small: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  quote: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: RADIUS.md, borderWidth: 2, paddingHorizontal: 10, paddingVertical: 10, marginVertical: 2 },
-  qIcon: { fontSize: 34, width: 46, textAlign: 'center' },
-  action: { flex: 1, alignItems: 'center', gap: 4, borderRadius: RADIUS.md, paddingVertical: 12 },
-  pulseCore: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  codeBox: { width: 54, height: 62, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
 });
